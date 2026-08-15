@@ -17,11 +17,8 @@ const (
 )
 
 var (
-	ErrForbiddenTransition  = errors.New("forbidden transition")
-	ErrInvalidConfiguration = errors.New("invalid configuration")
-	ErrInvalidStock         = errors.New("invalid stock")
-	ErrExpiredTimeWindow    = errors.New("expired time window")
-	ErrDuplicateSaleItem    = errors.New("duplicate sale item")
+	ErrExpiredTimeWindow = errors.New("expired time window")
+	ErrDuplicateSaleItem = errors.New("duplicate sale item")
 )
 
 type Sale struct {
@@ -50,7 +47,7 @@ func NewSale(
 	createdAt time.Time,
 ) (Sale, error) {
 	if id == uuid.Nil {
-		return Sale{}, fmt.Errorf("sale is empty: %w", ErrInvalidConfiguration)
+		return Sale{}, fmt.Errorf("sale id is empty: %w", ErrInvalidConfiguration)
 	}
 
 	if !startsAt.Before(endsAt) {
@@ -127,7 +124,7 @@ func (s *Sale) AddItem(
 	}
 
 	if totalQty <= 0 {
-		return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidStock)
+		return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidQuantity)
 	}
 
 	if s.hasItem(id) {
@@ -208,20 +205,8 @@ func (s *Sale) Activate(now time.Time) error {
 	}
 
 	for _, item := range s.items {
-		if item.totalQty <= 0 {
-			return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidStock)
-		}
-
-		if item.reservedQty < 0 {
-			return fmt.Errorf("reserved_qty must be >= 0: %w", ErrInvalidStock)
-		}
-
-		if item.soldQty < 0 {
-			return fmt.Errorf("sold_qty must be >= 0: %w", ErrInvalidStock)
-		}
-
-		if item.soldQty+item.reservedQty > item.totalQty {
-			return fmt.Errorf("invalid qty mathematics: %w", ErrInvalidStock)
+		if err := validateSaleItem(item); err != nil {
+			return err
 		}
 	}
 
@@ -230,6 +215,26 @@ func (s *Sale) Activate(now time.Time) error {
 	}
 
 	s.state = ActiveState
+
+	return nil
+}
+
+func validateSaleItem(item SaleItem) error {
+	if item.totalQty <= 0 {
+		return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidQuantity)
+	}
+
+	if item.reservedQty < 0 {
+		return fmt.Errorf("reserved_qty must be >= 0: %w", ErrInvalidQuantity)
+	}
+
+	if item.soldQty < 0 {
+		return fmt.Errorf("sold_qty must be >= 0: %w", ErrInvalidQuantity)
+	}
+
+	if item.soldQty+item.reservedQty > item.totalQty {
+		return fmt.Errorf("invalid quantity mathematics: %w", ErrInvalidQuantity)
+	}
 
 	return nil
 }

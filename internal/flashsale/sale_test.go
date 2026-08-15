@@ -253,9 +253,9 @@ func TestSaleAddItemRejectsInvalidTotalQty(t *testing.T) {
 				tt.totalQty,
 			)
 
-			if !errors.Is(err, ErrInvalidStock) {
+			if !errors.Is(err, ErrInvalidQuantity) {
 				t.Fatalf(
-					"AddItem() error = %v, want ErrInvalidStock",
+					"AddItem() error = %v, want ErrInvalidQuantity",
 					err,
 				)
 			}
@@ -695,9 +695,9 @@ func TestSaleActivateRejectsInvalidStockSnapshot(t *testing.T) {
 				sale.StartsAt().Add(-time.Hour),
 			)
 
-			if !errors.Is(err, ErrInvalidStock) {
+			if !errors.Is(err, ErrInvalidQuantity) {
 				t.Fatalf(
-					"Activate() error = %v, want ErrInvalidStock",
+					"Activate() error = %v, want ErrInvalidQuantity",
 					err,
 				)
 			}
