@@ -2,22 +2,31 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestRun_CancelStopsWorkerAndWaitsForCompletion(t *testing.T) {
+func TestRun_ReturnsWhenWorkerFinishesBeforeCancellation(t *testing.T) {
+	ctx := context.Background()
+
+	worker := func(context.Context) {}
+
+	err := Run(ctx, worker, time.Second)
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+}
+
+func TestRun_CancellationWaitsForWorker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	started := make(chan struct{})
 	cancelObserved := make(chan struct{})
 	allowWorkerToFinish := make(chan struct{})
-	runReturned := make(chan struct{})
+	runReturned := make(chan error, 1)
 
 	worker := func(ctx context.Context) {
-		close(started)
-
 		<-ctx.Done()
 		close(cancelObserved)
 
@@ -25,73 +34,7 @@ func TestRun_CancelStopsWorkerAndWaitsForCompletion(t *testing.T) {
 	}
 
 	go func() {
-		Run(ctx, worker)
-		close(runReturned)
-	}()
-
-	<-started
-
-	cancel()
-
-	<-cancelObserved
-
-	select {
-	case <-runReturned:
-		t.Fatal("Run returned before worker finished")
-	default:
-	}
-
-	close(allowWorkerToFinish)
-
-	select {
-	case <-runReturned:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not return after worker finished")
-	}
-}
-
-func TestRun_ReturnsWhenWorkerFinishesByItself(t *testing.T) {
-	ctx := context.Background()
-
-	workerFinished := make(chan struct{})
-	runReturned := make(chan struct{})
-
-	worker := func(context.Context) {
-		close(workerFinished)
-	}
-
-	go func() {
-		Run(ctx, worker)
-		close(runReturned)
-	}()
-
-	select {
-	case <-workerFinished:
-	case <-time.After(time.Second):
-		t.Fatal("worker did not finish")
-	}
-
-	select {
-	case <-runReturned:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not return after worker finished")
-	}
-}
-
-func TestRun_PassesContextToWorker(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cancelObserved := make(chan struct{})
-	runReturned := make(chan struct{})
-
-	worker := func(ctx context.Context) {
-		<-ctx.Done()
-		close(cancelObserved)
-	}
-
-	go func() {
-		Run(ctx, worker)
-		close(runReturned)
+		runReturned <- Run(ctx, worker, time.Second)
 	}()
 
 	cancel()
@@ -103,8 +46,68 @@ func TestRun_PassesContextToWorker(t *testing.T) {
 	}
 
 	select {
-	case <-runReturned:
+	case err := <-runReturned:
+		t.Fatalf("Run() returned before worker finished: %v", err)
+	default:
+	}
+
+	close(allowWorkerToFinish)
+
+	select {
+	case err := <-runReturned:
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
 	case <-time.After(time.Second):
-		t.Fatal("Run did not return after worker finished")
+		t.Fatal("Run() did not return after worker finished")
+	}
+}
+
+func TestRun_ReturnsShutdownTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	workerStarted := make(chan struct{})
+	allowWorkerToFinish := make(chan struct{})
+	workerFinished := make(chan struct{})
+
+	worker := func(ctx context.Context) {
+		close(workerStarted)
+
+		<-ctx.Done()
+		<-allowWorkerToFinish
+
+		close(workerFinished)
+	}
+
+	runReturned := make(chan error, 1)
+
+	go func() {
+		runReturned <- Run(ctx, worker, 50*time.Millisecond)
+	}()
+
+	<-workerStarted
+	cancel()
+
+	var err error
+
+	select {
+	case err = <-runReturned:
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after shutdown timeout")
+	}
+
+	if !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf(
+			"Run() error = %v, want error wrapping ErrShutdownTimeout",
+			err,
+		)
+	}
+
+	close(allowWorkerToFinish)
+
+	select {
+	case <-workerFinished:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not finish")
 	}
 }
