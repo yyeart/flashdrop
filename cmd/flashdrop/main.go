@@ -35,10 +35,10 @@ func main() {
 
 	if err := run(
 		ctx,
+		config.ShutdownTimeout,
 		func(ctx context.Context) {
 			<-ctx.Done()
 		},
-		config.ShutdownTimeout,
 	); err != nil {
 		logger.Error("worker error", "err", err)
 
@@ -48,10 +48,11 @@ func main() {
 
 func run(
 	ctx context.Context,
-	worker func(context.Context),
 	shutdownTimeout time.Duration,
+	workers ...app.Worker,
 ) error {
-	if err := app.Run(ctx, worker, shutdownTimeout); err != nil {
+
+	if err := app.Run(ctx, shutdownTimeout, workers...); err != nil {
 		return err
 	}
 

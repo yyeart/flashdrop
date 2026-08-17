@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -15,18 +16,31 @@ type Worker func(context.Context)
 
 func Run(
 	ctx context.Context,
-	worker Worker,
 	shutdownTimeout time.Duration,
+	workers ...Worker,
 ) error {
-	done := make(chan struct{})
+	if len(workers) == 0 {
+		return nil
+	}
+
+	allDone := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(len(workers))
+
+	for _, worker := range workers {
+		go func(w Worker) {
+			defer wg.Done()
+			w(ctx)
+		}(worker)
+	}
 
 	go func() {
-		defer close(done)
-		worker(ctx)
+		wg.Wait()
+		close(allDone)
 	}()
 
 	select {
-	case <-done:
+	case <-allDone:
 		return nil
 	case <-ctx.Done():
 	}
@@ -35,15 +49,15 @@ func Run(
 	defer timer.Stop()
 
 	select {
-	case <-done:
+	case <-allDone:
 		return nil
 	case <-timer.C:
 		select {
-		case <-done:
+		case <-allDone:
 			return nil
 		default:
 			return fmt.Errorf(
-				"worker did not finish within %s: %w",
+				"workers did not finish within %s: %w",
 				shutdownTimeout,
 				ErrShutdownTimeout,
 			)

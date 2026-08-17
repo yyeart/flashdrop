@@ -28,7 +28,7 @@ func TestRun_CancelStopsWorkerAndWaitsForCompletion(t *testing.T) {
 	}
 
 	go func() {
-		if err := run(ctx, worker, time.Second); err != nil {
+		if err := run(ctx, time.Second, worker); err != nil {
 			return
 		}
 		close(runReturned)
@@ -76,7 +76,7 @@ func TestRun_ReturnsWhenWorkerFinishesByItself(t *testing.T) {
 	}
 
 	go func() {
-		if err := run(ctx, worker, time.Second); err != nil {
+		if err := run(ctx, time.Second, worker); err != nil {
 			return
 		}
 		close(runReturned)
@@ -118,7 +118,7 @@ func TestRun_DoesNotTimeoutBeforeContextCancellation(t *testing.T) {
 	shutdownTimeout := 10 * time.Millisecond
 
 	go func() {
-		if err := run(ctx, worker, shutdownTimeout); err != nil {
+		if err := run(ctx, shutdownTimeout, worker); err != nil {
 			return
 		}
 		close(runReturned)
@@ -164,7 +164,7 @@ func TestRun_AlreadyCancelledContextStillStartsAndWaitsForWorker(t *testing.T) {
 	}
 
 	go func() {
-		if err := run(ctx, worker, time.Second); err != nil {
+		if err := run(ctx, time.Second, worker); err != nil {
 			return
 		}
 		close(runReturned)
@@ -216,7 +216,7 @@ func TestRun_ReturnsShutdownTimeoutError(t *testing.T) {
 	}
 
 	go func() {
-		runReturned <- run(ctx, worker, 10*time.Millisecond)
+		runReturned <- run(ctx, 10*time.Millisecond, worker)
 	}()
 
 	select {

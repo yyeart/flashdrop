@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# codebase-memory-mcp
+.codebase-memory/
+
 # Editor/IDE
 # .idea/
 # .vscode/
