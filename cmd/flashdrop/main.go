@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/yyeart/flashdrop/internal/app"
+	"github.com/yyeart/flashdrop/internal/appLogger"
 	"github.com/yyeart/flashdrop/internal/config"
 )
 
@@ -20,12 +21,17 @@ func main() {
 	)
 	defer stop()
 
+	btLogger := appLogger.NewLogger(slog.LevelInfo, os.Stderr)
+
 	config, err := config.Load()
 	if err != nil {
-		fmt.Printf("failed to load config: %v", err)
+		btLogger.Error("failed to load config", "err", err)
 
 		os.Exit(1)
 	}
+
+	logger := appLogger.NewLogger(config.LogLevel, os.Stderr)
+	slog.SetDefault(logger)
 
 	if err := run(
 		ctx,
@@ -34,7 +40,7 @@ func main() {
 		},
 		config.ShutdownTimeout,
 	); err != nil {
-		fmt.Printf("worker error: %v", err)
+		logger.Error("worker error", "err", err)
 
 		os.Exit(1)
 	}
