@@ -1,0 +1,76 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - bodyclose
+    - contextcheck
+    - fatcontext
+    - durationcheck
+    - makezero
+    - copyloopvar
+    - noctx
+    - gosec
+    - nosprintfhostport
+    - gocyclo
+    - gocognit
+    - maintidx
+    - prealloc
+    - perfsprint
+    - intrange
+    - misspell
+
+  settings:
+    gocyclo:
+      min-complexity: 15
+
+    gocognit:
+      min-complexity: 15
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+
+    perfsprint:
+      integer-format: true
+      int-conversion: true
+      error-format: true
+      sprintf1: true
+      strconcat: true
+
+    gosec:
+      severity: medium
+      confidence: medium
+      excludes:
+        - G104
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    fatcontext:
+      check-struct-pointers: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
