@@ -102,7 +102,7 @@ func TestSaleAddItem(t *testing.T) {
 	itemID := uuid.New()
 	productID := uuid.New()
 	name := "Test product"
-	price := 99.99
+	price := Money{amountMinor: 9_999}
 
 	err := sale.AddItem(
 		itemID,
@@ -148,11 +148,11 @@ func TestSaleAddItem(t *testing.T) {
 		)
 	}
 
-	if item.Price() != price {
+	if item.Price().AmountMinor() != price.AmountMinor() {
 		t.Fatalf(
-			"item.Price() = %v, want %v",
-			item.Price(),
-			price,
+			"item.Price().AmountMinor() = %d, want %d",
+			item.Price().AmountMinor(),
+			price.AmountMinor(),
 		)
 	}
 
@@ -205,7 +205,7 @@ func TestSaleAddItemRejectsInvalidIDs(t *testing.T) {
 				tt.itemID,
 				tt.productID,
 				"Test product",
-				100,
+				Money{amountMinor: 10_000},
 				10,
 			)
 
@@ -223,6 +223,46 @@ func TestSaleAddItemRejectsInvalidIDs(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestSaleAddItemRejectsZeroPrice(t *testing.T) {
+	sale := newValidSale(t)
+
+	err := sale.AddItem(
+		uuid.New(),
+		uuid.New(),
+		"Free product",
+		Money{},
+		10,
+	)
+
+	if !errors.Is(err, ErrInvalidMoney) {
+		t.Fatalf("AddItem() error = %v, want error for zero price", err)
+	}
+
+	if len(sale.Items()) != 0 {
+		t.Fatalf("len(Items()) = %d, want 0", len(sale.Items()))
+	}
+}
+
+func TestSaleAddItemRejectsNegativePrice(t *testing.T) {
+	sale := newValidSale(t)
+
+	err := sale.AddItem(
+		uuid.New(),
+		uuid.New(),
+		"Free product",
+		Money{amountMinor: -1},
+		10,
+	)
+
+	if !errors.Is(err, ErrInvalidMoney) {
+		t.Fatalf("AddItem() error = %v, want error for negative price", err)
+	}
+
+	if len(sale.Items()) != 0 {
+		t.Fatalf("len(Items()) = %d, want 0", len(sale.Items()))
 	}
 }
 
@@ -249,7 +289,7 @@ func TestSaleAddItemRejectsInvalidTotalQty(t *testing.T) {
 				uuid.New(),
 				uuid.New(),
 				"Test product",
-				100,
+				Money{amountMinor: 10_000},
 				tt.totalQty,
 			)
 
@@ -278,7 +318,7 @@ func TestSaleAddItemRejectsDuplicateID(t *testing.T) {
 		itemID,
 		uuid.New(),
 		"First product",
-		100,
+		Money{amountMinor: 10_000},
 		10,
 	)
 	if err != nil {
@@ -289,7 +329,7 @@ func TestSaleAddItemRejectsDuplicateID(t *testing.T) {
 		itemID,
 		uuid.New(),
 		"Second product",
-		200,
+		Money{amountMinor: 20_000},
 		20,
 	)
 
@@ -319,7 +359,7 @@ func TestSaleAddItemFromActiveForbidden(t *testing.T) {
 		uuid.New(),
 		uuid.New(),
 		"Another product",
-		100,
+		Money{amountMinor: 10_000},
 		10,
 	)
 
@@ -353,7 +393,7 @@ func TestSaleAddItemFromEndedForbidden(t *testing.T) {
 		uuid.New(),
 		uuid.New(),
 		"Another product",
-		100,
+		Money{amountMinor: 10_000},
 		10,
 	)
 
@@ -436,6 +476,27 @@ func TestSaleItemAvailableQty(t *testing.T) {
 		t.Fatalf(
 			"AvailableQty() = %d, want 5",
 			item.AvailableQty(),
+		)
+	}
+}
+
+func TestSaleActivateNegativeItemPrice(t *testing.T) {
+	sale := newSaleWithItem(t)
+	sale.items[0].price = Money{amountMinor: -1}
+
+	err := sale.Activate(sale.StartsAt().Add(-time.Hour))
+	if !errors.Is(err, ErrInvalidMoney) {
+		t.Fatalf(
+			"Activate() error = %q, want ErrInvalidMoney",
+			err,
+		)
+	}
+
+	if sale.State() != DraftState {
+		t.Fatalf(
+			"State() = %q, want %q",
+			sale.State(),
+			DraftState,
 		)
 	}
 }
@@ -810,7 +871,7 @@ func newSaleWithItem(t *testing.T) Sale {
 		uuid.New(),
 		uuid.New(),
 		"Test product",
-		100,
+		Money{amountMinor: 10_000},
 		10,
 	)
 	if err != nil {

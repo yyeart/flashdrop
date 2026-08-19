@@ -35,7 +35,7 @@ type SaleItem struct {
 	saleID      uuid.UUID
 	productID   uuid.UUID
 	name        string
-	price       float64
+	price       Money
 	totalQty    int
 	reservedQty int
 	soldQty     int
@@ -108,7 +108,7 @@ func (s *Sale) AddItem(
 	id uuid.UUID,
 	productID uuid.UUID,
 	name string,
-	price float64,
+	price Money,
 	totalQty int,
 ) error {
 	if s.State() != DraftState {
@@ -129,6 +129,10 @@ func (s *Sale) AddItem(
 
 	if s.hasItem(id) {
 		return fmt.Errorf("sale item %s already exists: %w", id, ErrDuplicateSaleItem)
+	}
+
+	if price.amountMinor <= 0 {
+		return fmt.Errorf("price must be > 0: %w", ErrInvalidMoney)
 	}
 
 	s.items = append(s.items, SaleItem{
@@ -187,7 +191,7 @@ func (si *SaleItem) Name() string {
 	return si.name
 }
 
-func (si *SaleItem) Price() float64 {
+func (si *SaleItem) Price() Money {
 	return si.price
 }
 
@@ -234,6 +238,10 @@ func validateSaleItem(item SaleItem) error {
 
 	if item.soldQty+item.reservedQty > item.totalQty {
 		return fmt.Errorf("invalid quantity mathematics: %w", ErrInvalidQuantity)
+	}
+
+	if item.price.amountMinor <= 0 {
+		return fmt.Errorf("price must be > 0: %w", ErrInvalidMoney)
 	}
 
 	return nil
