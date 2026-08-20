@@ -9,6 +9,200 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestNewOrder(t *testing.T) {
+	validInput := func() NewOrderInput {
+		return NewOrderInput{
+			id:            uuid.New(),
+			reservationID: uuid.New(),
+			userID:        uuid.New(),
+			saleItemID:    uuid.New(),
+			qty:           3,
+			createdAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*NewOrderInput)
+		wantErr error
+	}{
+		{
+			name:   "valid order",
+			mutate: func(*NewOrderInput) {},
+		},
+		{
+			name: "empty order id",
+			mutate: func(input *NewOrderInput) {
+				input.id = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty reservation id",
+			mutate: func(input *NewOrderInput) {
+				input.reservationID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty user id",
+			mutate: func(input *NewOrderInput) {
+				input.userID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty sale item id",
+			mutate: func(input *NewOrderInput) {
+				input.saleItemID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "zero quantity",
+			mutate: func(input *NewOrderInput) {
+				input.qty = 0
+			},
+			wantErr: ErrInvalidQuantity,
+		},
+		{
+			name: "negative quantity",
+			mutate: func(input *NewOrderInput) {
+				input.qty = -1
+			},
+			wantErr: ErrInvalidQuantity,
+		},
+		{
+			name: "zero created at",
+			mutate: func(input *NewOrderInput) {
+				input.createdAt = time.Time{}
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := validInput()
+			tt.mutate(&input)
+
+			order, err := NewOrder(input)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("NewOrder() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("NewOrder() unexpected error = %v", err)
+			}
+
+			assertOrderMatchesNewOrderInput(t, order, input)
+		})
+	}
+}
+
+func TestRehydrateOrder(t *testing.T) {
+	validSnapshot := func() OrderSnapshot {
+		return OrderSnapshot{
+			id:            uuid.New(),
+			reservationID: uuid.New(),
+			userID:        uuid.New(),
+			saleItemID:    uuid.New(),
+			qty:           3,
+			createdAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*OrderSnapshot)
+		wantErr error
+	}{
+		{
+			name:   "valid snapshot",
+			mutate: func(*OrderSnapshot) {},
+		},
+		{
+			name: "empty order id",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.id = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty reservation id",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.reservationID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty user id",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.userID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "empty sale item id",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.saleItemID = uuid.Nil
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+		{
+			name: "zero quantity",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.qty = 0
+			},
+			wantErr: ErrInvalidQuantity,
+		},
+		{
+			name: "negative quantity",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.qty = -1
+			},
+			wantErr: ErrInvalidQuantity,
+		},
+		{
+			name: "zero created at",
+			mutate: func(snapshot *OrderSnapshot) {
+				snapshot.createdAt = time.Time{}
+			},
+			wantErr: ErrInvalidConfiguration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := validSnapshot()
+			tt.mutate(&snapshot)
+
+			order, err := RehydrateOrder(snapshot)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf(
+						"RehydrateOrder() error = %v, want %v",
+						err,
+						tt.wantErr,
+					)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("RehydrateOrder() unexpected error = %v", err)
+			}
+
+			assertOrderMatchesSnapshot(t, order, snapshot)
+		})
+	}
+}
+
 func TestOrder_PublicAPIIsReadOnly(t *testing.T) {
 	orderType := reflect.TypeOf(Order{})
 
@@ -43,192 +237,110 @@ func TestOrder_PublicAPIIsReadOnly(t *testing.T) {
 		method := orderPtrType.Method(i)
 
 		if _, ok := allowedMethods[method.Name]; !ok {
-			t.Errorf("Order exposes unexpected public method %q", method.Name)
+			t.Errorf(
+				"Order exposes unexpected public method %q",
+				method.Name,
+			)
 		}
 	}
 }
 
-func TestNewOrder_ExposesCreatedDataReadOnly(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := 3
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
+func assertOrderMatchesNewOrderInput(
+	t *testing.T,
+	order Order,
+	input NewOrderInput,
+) {
+	t.Helper()
 
-	order, err := newOrder(
-		id,
-		reservationID,
-		userID,
-		saleItemID,
-		quantity,
-		createdAt,
-	)
-	if err != nil {
-		t.Fatalf("NewOrder() error = %v", err)
+	if order.ID() != input.id {
+		t.Errorf("ID() = %v, want %v", order.ID(), input.id)
 	}
 
-	if got := order.ID(); got != id {
-		t.Errorf("ID() = %v, want %v", got, id)
+	if order.ReservationID() != input.reservationID {
+		t.Errorf(
+			"ReservationID() = %v, want %v",
+			order.ReservationID(),
+			input.reservationID,
+		)
 	}
 
-	if got := order.ReservationID(); got != reservationID {
-		t.Errorf("ReservationID() = %v, want %v", got, reservationID)
+	if order.UserID() != input.userID {
+		t.Errorf("UserID() = %v, want %v", order.UserID(), input.userID)
 	}
 
-	if got := order.UserID(); got != userID {
-		t.Errorf("UserID() = %v, want %v", got, userID)
+	if order.SaleItemID() != input.saleItemID {
+		t.Errorf(
+			"SaleItemID() = %v, want %v",
+			order.SaleItemID(),
+			input.saleItemID,
+		)
 	}
 
-	if got := order.SaleItemID(); got != saleItemID {
-		t.Errorf("SaleItemID() = %v, want %v", got, saleItemID)
+	if order.Quantity() != input.qty {
+		t.Errorf(
+			"Quantity() = %d, want %d",
+			order.Quantity(),
+			input.qty,
+		)
 	}
 
-	if got := order.Quantity(); got != quantity {
-		t.Errorf("Quantity() = %d, want %d", got, quantity)
-	}
-
-	if got := order.CreatedAt(); !got.Equal(createdAt) {
-		t.Errorf("CreatedAt() = %v, want %v", got, createdAt)
-	}
-}
-
-func TestNewOrder_EmptyOrderID(t *testing.T) {
-	id := uuid.Nil
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := 3
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidConfiguration",
-			err,
+	if !order.CreatedAt().Equal(input.createdAt) {
+		t.Errorf(
+			"CreatedAt() = %v, want %v",
+			order.CreatedAt(),
+			input.createdAt,
 		)
 	}
 }
 
-func TestNewOrder_EmptyReservationID(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.Nil
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := 3
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
+func assertOrderMatchesSnapshot(
+	t *testing.T,
+	order Order,
+	snapshot OrderSnapshot,
+) {
+	t.Helper()
 
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
+	if order.ID() != snapshot.id {
+		t.Errorf("ID() = %v, want %v", order.ID(), snapshot.id)
+	}
 
-	if !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidConfiguration",
-			err,
+	if order.ReservationID() != snapshot.reservationID {
+		t.Errorf(
+			"ReservationID() = %v, want %v",
+			order.ReservationID(),
+			snapshot.reservationID,
 		)
 	}
-}
 
-func TestNewOrder_EmptyUserID(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.Nil
-	saleItemID := uuid.New()
-	quantity := 3
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidConfiguration",
-			err,
+	if order.UserID() != snapshot.userID {
+		t.Errorf(
+			"UserID() = %v, want %v",
+			order.UserID(),
+			snapshot.userID,
 		)
 	}
-}
 
-func TestNewOrder_EmptySaleItemID(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.Nil
-	quantity := 3
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidConfiguration",
-			err,
+	if order.SaleItemID() != snapshot.saleItemID {
+		t.Errorf(
+			"SaleItemID() = %v, want %v",
+			order.SaleItemID(),
+			snapshot.saleItemID,
 		)
 	}
-}
 
-func TestNewOrder_NegativeQty(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := -1
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidQuantity) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidQuantity",
-			err,
+	if order.Quantity() != snapshot.qty {
+		t.Errorf(
+			"Quantity() = %d, want %d",
+			order.Quantity(),
+			snapshot.qty,
 		)
 	}
-}
 
-func TestNewOrder_ZeroQty(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := 0
-	createdAt := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidQuantity) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidQuantity",
-			err,
-		)
-	}
-}
-
-func TestNewOrder_ZeroCreatedAt(t *testing.T) {
-	id := uuid.New()
-	reservationID := uuid.New()
-	userID := uuid.New()
-	saleItemID := uuid.New()
-	quantity := 3
-	createdAt := time.Time{}
-
-	_, err := newOrder(
-		id, reservationID, userID, saleItemID, quantity, createdAt,
-	)
-
-	if !errors.Is(err, ErrInvalidConfiguration) {
-		t.Fatalf(
-			"newOrder() error = %v, want ErrInvalidConfiguration",
-			err,
+	if !order.CreatedAt().Equal(snapshot.createdAt) {
+		t.Errorf(
+			"CreatedAt() = %v, want %v",
+			order.CreatedAt(),
+			snapshot.createdAt,
 		)
 	}
 }
