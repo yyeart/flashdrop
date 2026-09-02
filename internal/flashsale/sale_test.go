@@ -79,12 +79,7 @@ func TestNewSaleRejectsInvalidTimeWindow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewSale(
-				uuid.New(),
-				tt.startsAt,
-				tt.endsAt,
-				base,
-			)
+			_, err := NewSale(uuid.New(), tt.startsAt, tt.endsAt, base)
 
 			if !errors.Is(err, ErrInvalidConfiguration) {
 				t.Fatalf(
@@ -104,13 +99,7 @@ func TestSaleAddItem(t *testing.T) {
 	name := "Test product"
 	price := Money{amountMinor: 9_999}
 
-	err := sale.AddItem(
-		itemID,
-		productID,
-		name,
-		price,
-		10,
-	)
+	err := sale.AddItem(itemID, productID, name, price, 10)
 	if err != nil {
 		t.Fatalf("AddItem() error = %v", err)
 	}

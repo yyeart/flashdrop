@@ -31,38 +31,14 @@ func NewReservation(
 	qty int,
 	createdAt, expiresAt time.Time,
 ) (Reservation, error) {
-	if id == uuid.Nil {
+	if err := validateReservation(
+		id, userID, saleItemID,
+		qty,
+		createdAt, expiresAt,
+	); err != nil {
 		return Reservation{}, fmt.Errorf(
-			"reservation id is empty: %w",
-			ErrInvalidConfiguration,
-		)
-	}
-
-	if userID == uuid.Nil {
-		return Reservation{}, fmt.Errorf(
-			"user id is empty: %w",
-			ErrInvalidConfiguration,
-		)
-	}
-
-	if saleItemID == uuid.Nil {
-		return Reservation{}, fmt.Errorf(
-			"sale_item id is empty: %w",
-			ErrInvalidConfiguration,
-		)
-	}
-
-	if qty <= 0 {
-		return Reservation{}, fmt.Errorf(
-			"qty must be > 0: %w",
-			ErrInvalidQuantity,
-		)
-	}
-
-	if !createdAt.Before(expiresAt) {
-		return Reservation{}, fmt.Errorf(
-			"created_at must be before expires_at: %w",
-			ErrInvalidConfiguration,
+			"reservation input validation: %w",
+			err,
 		)
 	}
 
@@ -75,6 +51,91 @@ func NewReservation(
 		createdAt:  createdAt,
 		expiresAt:  expiresAt,
 	}, nil
+}
+
+func RehydrateReservation(snapshot ReservationSnapshot) (Reservation, error) {
+	if err := validateReservation(
+		snapshot.ID, snapshot.UserID, snapshot.SaleItemID,
+		snapshot.Quantity,
+		snapshot.CreatedAt, snapshot.ExpiresAt,
+	); err != nil {
+		return Reservation{}, fmt.Errorf(
+			"reservation snapshot validation: %w",
+			err,
+		)
+	}
+
+	if err := validateReservationState(snapshot.State); err != nil {
+		return Reservation{}, fmt.Errorf(
+			"reservation snapshot state validation: %w",
+			err,
+		)
+	}
+
+	return Reservation{
+		id:         snapshot.ID,
+		userID:     snapshot.UserID,
+		saleItemID: snapshot.SaleItemID,
+		qty:        snapshot.Quantity,
+		state:      snapshot.State,
+		createdAt:  snapshot.CreatedAt,
+		expiresAt:  snapshot.ExpiresAt,
+	}, nil
+}
+
+func validateReservation(
+	id, userID, saleItemID uuid.UUID,
+	qty int,
+	createdAt, expiresAt time.Time,
+) error {
+	if id == uuid.Nil {
+		return fmt.Errorf(
+			"reservation id is empty: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	if userID == uuid.Nil {
+		return fmt.Errorf(
+			"user id is empty: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	if saleItemID == uuid.Nil {
+		return fmt.Errorf(
+			"sale_item id is empty: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	if qty <= 0 {
+		return fmt.Errorf(
+			"qty must be > 0: %w",
+			ErrInvalidQuantity,
+		)
+	}
+
+	if !createdAt.Before(expiresAt) {
+		return fmt.Errorf(
+			"created_at must be before expires_at: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	return nil
+}
+
+func validateReservationState(state ReservationState) error {
+	switch state {
+	case PendingState, PaidState, CancelledState, ExpiredState:
+		return nil
+	default:
+		return fmt.Errorf(
+			"unknown reservation state %q: %w",
+			state, ErrInvalidConfiguration,
+		)
+	}
 }
 
 func (r *Reservation) ID() uuid.UUID {

@@ -17,21 +17,12 @@ type Order struct {
 }
 
 type NewOrderInput struct {
-	reservationID uuid.UUID
-	userID        uuid.UUID
-	saleItemID    uuid.UUID
-	qty           int
-	id            uuid.UUID
-	createdAt     time.Time
-}
-
-type OrderSnapshot struct {
-	id            uuid.UUID
-	reservationID uuid.UUID
-	userID        uuid.UUID
-	saleItemID    uuid.UUID
-	qty           int
-	createdAt     time.Time
+	ReservationID uuid.UUID
+	UserID        uuid.UUID
+	SaleItemID    uuid.UUID
+	Quantity      int
+	ID            uuid.UUID
+	CreatedAt     time.Time
 }
 
 func (o *Order) ID() uuid.UUID {
@@ -60,29 +51,29 @@ func (o *Order) CreatedAt() time.Time {
 
 func NewOrder(input NewOrderInput) (Order, error) {
 	if err := validateOrder(
-		input.id, input.reservationID, input.userID,
-		input.saleItemID, input.qty, input.createdAt,
+		input.ID, input.ReservationID, input.UserID,
+		input.SaleItemID, input.Quantity, input.CreatedAt,
 	); err != nil {
 		return Order{}, fmt.Errorf("order input validation: %w", err)
 	}
 
 	return newOrder(
-		input.id, input.reservationID, input.userID, input.saleItemID,
-		input.qty, input.createdAt,
+		input.ID, input.ReservationID, input.UserID, input.SaleItemID,
+		input.Quantity, input.CreatedAt,
 	), nil
 }
 
 func RehydrateOrder(snapshot OrderSnapshot) (Order, error) {
 	if err := validateOrder(
-		snapshot.id, snapshot.reservationID, snapshot.userID,
-		snapshot.saleItemID, snapshot.qty, snapshot.createdAt,
+		snapshot.ID, snapshot.ReservationID, snapshot.UserID,
+		snapshot.SaleItemID, snapshot.Quantity, snapshot.CreatedAt,
 	); err != nil {
 		return Order{}, fmt.Errorf("order snapshot validation: %w", err)
 	}
 
 	return newOrder(
-		snapshot.id, snapshot.reservationID, snapshot.userID, snapshot.saleItemID,
-		snapshot.qty, snapshot.createdAt,
+		snapshot.ID, snapshot.ReservationID, snapshot.UserID, snapshot.SaleItemID,
+		snapshot.Quantity, snapshot.CreatedAt,
 	), nil
 }
 

@@ -12,12 +12,12 @@ import (
 func TestNewOrder(t *testing.T) {
 	validInput := func() NewOrderInput {
 		return NewOrderInput{
-			id:            uuid.New(),
-			reservationID: uuid.New(),
-			userID:        uuid.New(),
-			saleItemID:    uuid.New(),
-			qty:           3,
-			createdAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+			ID:            uuid.New(),
+			ReservationID: uuid.New(),
+			UserID:        uuid.New(),
+			SaleItemID:    uuid.New(),
+			Quantity:      3,
+			CreatedAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
 		}
 	}
 
@@ -33,49 +33,49 @@ func TestNewOrder(t *testing.T) {
 		{
 			name: "empty order id",
 			mutate: func(input *NewOrderInput) {
-				input.id = uuid.Nil
+				input.ID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty reservation id",
 			mutate: func(input *NewOrderInput) {
-				input.reservationID = uuid.Nil
+				input.ReservationID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty user id",
 			mutate: func(input *NewOrderInput) {
-				input.userID = uuid.Nil
+				input.UserID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty sale item id",
 			mutate: func(input *NewOrderInput) {
-				input.saleItemID = uuid.Nil
+				input.SaleItemID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "zero quantity",
 			mutate: func(input *NewOrderInput) {
-				input.qty = 0
+				input.Quantity = 0
 			},
 			wantErr: ErrInvalidQuantity,
 		},
 		{
 			name: "negative quantity",
 			mutate: func(input *NewOrderInput) {
-				input.qty = -1
+				input.Quantity = -1
 			},
 			wantErr: ErrInvalidQuantity,
 		},
 		{
 			name: "zero created at",
 			mutate: func(input *NewOrderInput) {
-				input.createdAt = time.Time{}
+				input.CreatedAt = time.Time{}
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
@@ -107,12 +107,12 @@ func TestNewOrder(t *testing.T) {
 func TestRehydrateOrder(t *testing.T) {
 	validSnapshot := func() OrderSnapshot {
 		return OrderSnapshot{
-			id:            uuid.New(),
-			reservationID: uuid.New(),
-			userID:        uuid.New(),
-			saleItemID:    uuid.New(),
-			qty:           3,
-			createdAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+			ID:            uuid.New(),
+			ReservationID: uuid.New(),
+			UserID:        uuid.New(),
+			SaleItemID:    uuid.New(),
+			Quantity:      3,
+			CreatedAt:     time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
 		}
 	}
 
@@ -128,49 +128,49 @@ func TestRehydrateOrder(t *testing.T) {
 		{
 			name: "empty order id",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.id = uuid.Nil
+				snapshot.ID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty reservation id",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.reservationID = uuid.Nil
+				snapshot.ReservationID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty user id",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.userID = uuid.Nil
+				snapshot.UserID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "empty sale item id",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.saleItemID = uuid.Nil
+				snapshot.SaleItemID = uuid.Nil
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
 		{
 			name: "zero quantity",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.qty = 0
+				snapshot.Quantity = 0
 			},
 			wantErr: ErrInvalidQuantity,
 		},
 		{
 			name: "negative quantity",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.qty = -1
+				snapshot.Quantity = -1
 			},
 			wantErr: ErrInvalidQuantity,
 		},
 		{
 			name: "zero created at",
 			mutate: func(snapshot *OrderSnapshot) {
-				snapshot.createdAt = time.Time{}
+				snapshot.CreatedAt = time.Time{}
 			},
 			wantErr: ErrInvalidConfiguration,
 		},
@@ -252,43 +252,43 @@ func assertOrderMatchesNewOrderInput(
 ) {
 	t.Helper()
 
-	if order.ID() != input.id {
-		t.Errorf("ID() = %v, want %v", order.ID(), input.id)
+	if order.ID() != input.ID {
+		t.Errorf("ID() = %v, want %v", order.ID(), input.ID)
 	}
 
-	if order.ReservationID() != input.reservationID {
+	if order.ReservationID() != input.ReservationID {
 		t.Errorf(
 			"ReservationID() = %v, want %v",
 			order.ReservationID(),
-			input.reservationID,
+			input.ReservationID,
 		)
 	}
 
-	if order.UserID() != input.userID {
-		t.Errorf("UserID() = %v, want %v", order.UserID(), input.userID)
+	if order.UserID() != input.UserID {
+		t.Errorf("UserID() = %v, want %v", order.UserID(), input.UserID)
 	}
 
-	if order.SaleItemID() != input.saleItemID {
+	if order.SaleItemID() != input.SaleItemID {
 		t.Errorf(
 			"SaleItemID() = %v, want %v",
 			order.SaleItemID(),
-			input.saleItemID,
+			input.SaleItemID,
 		)
 	}
 
-	if order.Quantity() != input.qty {
+	if order.Quantity() != input.Quantity {
 		t.Errorf(
 			"Quantity() = %d, want %d",
 			order.Quantity(),
-			input.qty,
+			input.Quantity,
 		)
 	}
 
-	if !order.CreatedAt().Equal(input.createdAt) {
+	if !order.CreatedAt().Equal(input.CreatedAt) {
 		t.Errorf(
 			"CreatedAt() = %v, want %v",
 			order.CreatedAt(),
-			input.createdAt,
+			input.CreatedAt,
 		)
 	}
 }
@@ -300,47 +300,47 @@ func assertOrderMatchesSnapshot(
 ) {
 	t.Helper()
 
-	if order.ID() != snapshot.id {
-		t.Errorf("ID() = %v, want %v", order.ID(), snapshot.id)
+	if order.ID() != snapshot.ID {
+		t.Errorf("ID() = %v, want %v", order.ID(), snapshot.ID)
 	}
 
-	if order.ReservationID() != snapshot.reservationID {
+	if order.ReservationID() != snapshot.ReservationID {
 		t.Errorf(
 			"ReservationID() = %v, want %v",
 			order.ReservationID(),
-			snapshot.reservationID,
+			snapshot.ReservationID,
 		)
 	}
 
-	if order.UserID() != snapshot.userID {
+	if order.UserID() != snapshot.UserID {
 		t.Errorf(
 			"UserID() = %v, want %v",
 			order.UserID(),
-			snapshot.userID,
+			snapshot.UserID,
 		)
 	}
 
-	if order.SaleItemID() != snapshot.saleItemID {
+	if order.SaleItemID() != snapshot.SaleItemID {
 		t.Errorf(
 			"SaleItemID() = %v, want %v",
 			order.SaleItemID(),
-			snapshot.saleItemID,
+			snapshot.SaleItemID,
 		)
 	}
 
-	if order.Quantity() != snapshot.qty {
+	if order.Quantity() != snapshot.Quantity {
 		t.Errorf(
 			"Quantity() = %d, want %d",
 			order.Quantity(),
-			snapshot.qty,
+			snapshot.Quantity,
 		)
 	}
 
-	if !order.CreatedAt().Equal(snapshot.createdAt) {
+	if !order.CreatedAt().Equal(snapshot.CreatedAt) {
 		t.Errorf(
 			"CreatedAt() = %v, want %v",
 			order.CreatedAt(),
-			snapshot.createdAt,
+			snapshot.CreatedAt,
 		)
 	}
 }
