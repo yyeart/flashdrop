@@ -79,6 +79,29 @@ make migrate-down
 make migrate-create seq=add_example_table
 ```
 
+## Интеграционные тесты PostgreSQL
+
+Тесты адаптера `flashsale/postgres` работают с настоящей базой из Compose и
+запускаются только явно. Перед запуском примените миграции:
+
+```bash
+make db-up
+make port-forward
+make migrate-up
+make test-integration
+```
+
+Цель `make test-integration` собирает `FLASHDROP_TEST_DSN` из
+`POSTGRES_USER`, `POSTGRES_PASSWORD` и `POSTGRES_DB` в `.env`. Для подключения
+с хоста она использует `127.0.0.1:5432` и `search_path=flashdrop,public`.
+
+Обычный `go test ./...` не подключается к базе: интеграционные тесты
+пропускаются, если `FLASHDROP_TEST_DSN` не задана. Поэтому для
+`make test-integration` нужны `.env`, запущенный PostgreSQL и применённые
+миграции. Тесты генерируют новые UUID для каждого сценария и удаляют только
+созданные ими строки через `testing.T.Cleanup`; `make db-clean` для них не
+нужен.
+
 ## Инварианты базы данных
 
 Ниже зафиксирован контракт Milestone 2. Соответствующие базовые ограничения

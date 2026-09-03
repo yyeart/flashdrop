@@ -30,6 +30,9 @@ jobs:
     uses: ./.github/workflows/go-test.yaml
     with:
       working-directory: .
+      # PostgreSQL adapter coverage is collected by opt-in integration tests.
+      # Keep it out of this unit-test gate until the Testcontainers job lands.
+      coverage-packages: "./cmd/flashdrop,./internal/app,./internal/appLogger,./internal/config,./internal/flashsale"
       run-race: true
 
   pr-report:

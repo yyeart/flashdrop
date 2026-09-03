@@ -1,10 +1,14 @@
 -include .env
 export
 
-.PHONY: test lint lint-fix port-forward port-close db-up db-down db-clean migrate-create migrate-action migrate-up migrate-down
+.PHONY: test test-integration lint lint-fix port-forward port-close db-up db-down db-clean migrate-create migrate-action migrate-up migrate-down
 
 test:
 	@go test ./... -cover
+
+test-integration: export FLASHDROP_TEST_DSN = postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:5432/$(POSTGRES_DB)?sslmode=disable&search_path=flashdrop,public
+test-integration:
+	@go test ./internal/flashsale/postgres -count=1
 
 lint:
 	@golangci-lint run ./...
