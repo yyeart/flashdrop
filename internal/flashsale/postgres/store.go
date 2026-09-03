@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyeart/flashdrop/internal/flashsale"
 )
@@ -183,20 +182,4 @@ func (s *Store) FindSale(
 	}
 
 	return sale, nil
-}
-
-func mapDatabaseError(operation string, err error) error {
-	var pgErr *pgconn.PgError
-
-	if errors.As(err, &pgErr) &&
-		pgErr.Code == postgresUniqueViolation {
-		return fmt.Errorf(
-			"%s: %w: %w",
-			operation,
-			flashsale.ErrConflict,
-			err,
-		)
-	}
-
-	return fmt.Errorf("%s: %w", operation, err)
 }
