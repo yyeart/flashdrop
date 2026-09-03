@@ -308,6 +308,9 @@ func createReserveFixture(
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 		defer cleanupCancel()
 
+		if _, err := pool.Exec(cleanupCtx, `DELETE FROM flashdrop.orders WHERE sale_item_id = $1`, fixture.itemID); err != nil {
+			t.Errorf("cleanup orders: %v", err)
+		}
 		if _, err := pool.Exec(cleanupCtx, `DELETE FROM flashdrop.reservations WHERE sale_item_id = $1`, fixture.itemID); err != nil {
 			t.Errorf("cleanup reservations: %v", err)
 		}

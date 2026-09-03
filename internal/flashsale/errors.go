@@ -9,4 +9,6 @@ var (
 	ErrSaleNotFound           = errors.New("sale not found")
 	ErrConflict               = errors.New("conflict")
 	ErrReservationUnavailable = errors.New("reservation unavailable")
+	ErrReservationNotFound    = errors.New("reservation not found")
+	ErrSaleItemNotFound       = errors.New("sale item not found")
 )
