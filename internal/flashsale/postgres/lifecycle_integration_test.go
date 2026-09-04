@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yyeart/flashdrop/internal/flashsale"
+	flashsale_postgres "github.com/yyeart/flashdrop/internal/flashsale/postgres"
 )
 
 const lifecycleCancelConcurrencyAttempts = 100
@@ -277,7 +278,14 @@ func reserveForLifecycle(
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if err := fixture.store.Reserve(ctx, reservation, fixture.now); err != nil {
+	if _, err := fixture.store.Reserve(
+		ctx,
+		flashsale_postgres.ReserveCommand{
+			Reservation:    reservation,
+			IdempotencyKey: uuid.NewString(),
+		},
+		fixture.now,
+	); err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
 
