@@ -20,7 +20,7 @@
 
 ## Completion
 
-A change is complete when its milestone criteria pass, relevant documentation still agrees with behavior, `go test ./...` passes, and concurrency-sensitive packages pass `go test -race ./...`.
+A change is complete when its milestone criteria pass, relevant documentation still agrees with behavior, `go test ./...`, `golangci-lint run ./...` pass, and concurrency-sensitive packages pass `go test -race ./...`.
 
 ## Agent skills
 

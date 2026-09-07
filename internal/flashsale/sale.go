@@ -35,7 +35,7 @@ type SaleItem struct {
 	saleID      uuid.UUID
 	productID   uuid.UUID
 	name        string
-	price       float64
+	price       Money
 	totalQty    int
 	reservedQty int
 	soldQty     int
@@ -46,14 +46,14 @@ func NewSale(
 	startsAt, endsAt time.Time,
 	createdAt time.Time,
 ) (Sale, error) {
-	if id == uuid.Nil {
-		return Sale{}, fmt.Errorf("sale id is empty: %w", ErrInvalidConfiguration)
-	}
-
-	if !startsAt.Before(endsAt) {
+	if err := validateSale(
+		id,
+		startsAt,
+		endsAt,
+	); err != nil {
 		return Sale{}, fmt.Errorf(
-			"starts_at must be before ends_at: %w",
-			ErrInvalidConfiguration,
+			"sale input validation: %w",
+			err,
 		)
 	}
 
@@ -65,6 +65,146 @@ func NewSale(
 		items:     nil,
 		createdAt: createdAt,
 	}, nil
+}
+
+func RehydrateSale(snapshot SaleSnapshot) (Sale, error) {
+	if err := validateSale(
+		snapshot.ID,
+		snapshot.StartsAt,
+		snapshot.EndsAt,
+	); err != nil {
+		return Sale{}, fmt.Errorf(
+			"sale snapshot validation: %w",
+			err,
+		)
+	}
+
+	switch snapshot.State {
+	case DraftState:
+	case ActiveState:
+		if len(snapshot.Items) == 0 {
+			return Sale{}, fmt.Errorf(
+				"active sale must have at least 1 sale item: %w",
+				ErrInvalidConfiguration,
+			)
+		}
+	case EndedState:
+		if len(snapshot.Items) == 0 {
+			return Sale{}, fmt.Errorf(
+				"ended sale must have at least 1 sale item: %w",
+				ErrInvalidConfiguration,
+			)
+		}
+	default:
+		return Sale{}, fmt.Errorf(
+			"invalid sale state: %s: %w",
+			snapshot.State, ErrInvalidConfiguration,
+		)
+	}
+
+	items := make([]SaleItem, 0, len(snapshot.Items))
+	seen := make(map[uuid.UUID]struct{}, len(snapshot.Items))
+
+	for idx, itemSnapshot := range snapshot.Items {
+		if _, exists := seen[itemSnapshot.ID]; exists {
+			return Sale{}, fmt.Errorf(
+				"sale item already exists: %w",
+				ErrDuplicateSaleItem,
+			)
+		}
+
+		item, err := rehydrateSaleItem(snapshot.ID, itemSnapshot)
+		if err != nil {
+			return Sale{}, fmt.Errorf(
+				"item %d failed to rehydrate: %w",
+				idx, err,
+			)
+		}
+
+		seen[itemSnapshot.ID] = struct{}{}
+		items = append(items, item)
+	}
+
+	return Sale{
+		id:        snapshot.ID,
+		state:     snapshot.State,
+		startsAt:  snapshot.StartsAt,
+		endsAt:    snapshot.EndsAt,
+		items:     items,
+		createdAt: snapshot.CreatedAt,
+	}, nil
+}
+
+func validateSale(
+	id uuid.UUID,
+	startsAt, endsAt time.Time,
+) error {
+	if id == uuid.Nil {
+		return fmt.Errorf("sale id is empty: %w", ErrInvalidConfiguration)
+	}
+
+	if !startsAt.Before(endsAt) {
+		return fmt.Errorf(
+			"starts_at must be before ends_at: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	return nil
+}
+
+func rehydrateSaleItem(
+	saleID uuid.UUID,
+	snapshot SaleItemSnapshot,
+) (SaleItem, error) {
+	if snapshot.ID == uuid.Nil {
+		return SaleItem{}, fmt.Errorf(
+			"sale item id is empty: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	if snapshot.SaleID != saleID {
+		return SaleItem{}, fmt.Errorf(
+			"sale ids do not match: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	if snapshot.ProductID == uuid.Nil {
+		return SaleItem{}, fmt.Errorf(
+			"product id is empty: %w",
+			ErrInvalidConfiguration,
+		)
+	}
+
+	price, err := NewMoneyFromMinor(snapshot.PriceMinor)
+	if err != nil {
+		return SaleItem{}, fmt.Errorf(
+			"price validation: %w",
+			err,
+		)
+	}
+
+	item := SaleItem{
+		id:          snapshot.ID,
+		saleID:      snapshot.SaleID,
+		productID:   snapshot.ProductID,
+		name:        snapshot.Name,
+		price:       price,
+		totalQty:    snapshot.TotalQty,
+		reservedQty: snapshot.ReservedQty,
+		soldQty:     snapshot.SoldQty,
+	}
+
+	if err := validateSaleItem(item); err != nil {
+		return SaleItem{}, fmt.Errorf(
+			"sale item validation: %w",
+			err,
+		)
+	}
+
+	return item, nil
 }
 
 func (s *Sale) ID() uuid.UUID {
@@ -105,33 +245,20 @@ func (s *Sale) Item(id uuid.UUID) (SaleItem, bool) {
 }
 
 func (s *Sale) AddItem(
-	id uuid.UUID,
-	productID uuid.UUID,
+	id, productID uuid.UUID,
 	name string,
-	price float64,
+	price Money,
 	totalQty int,
 ) error {
 	if s.State() != DraftState {
 		return fmt.Errorf("sale is not draft: %w", ErrForbiddenTransition)
 	}
 
-	if id == uuid.Nil {
-		return fmt.Errorf("sale item id is empty: %w", ErrInvalidConfiguration)
-	}
-
-	if productID == uuid.Nil {
-		return fmt.Errorf("product id is empty: %w", ErrInvalidConfiguration)
-	}
-
-	if totalQty <= 0 {
-		return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidQuantity)
-	}
-
 	if s.hasItem(id) {
 		return fmt.Errorf("sale item %s already exists: %w", id, ErrDuplicateSaleItem)
 	}
 
-	s.items = append(s.items, SaleItem{
+	item := SaleItem{
 		id:          id,
 		saleID:      s.ID(),
 		productID:   productID,
@@ -140,7 +267,13 @@ func (s *Sale) AddItem(
 		totalQty:    totalQty,
 		reservedQty: 0,
 		soldQty:     0,
-	})
+	}
+
+	if err := validateSaleItem(item); err != nil {
+		return fmt.Errorf("sale item validation: %w", err)
+	}
+
+	s.items = append(s.items, item)
 
 	return nil
 }
@@ -187,7 +320,7 @@ func (si *SaleItem) Name() string {
 	return si.name
 }
 
-func (si *SaleItem) Price() float64 {
+func (si *SaleItem) Price() Money {
 	return si.price
 }
 
@@ -220,6 +353,18 @@ func (s *Sale) Activate(now time.Time) error {
 }
 
 func validateSaleItem(item SaleItem) error {
+	if item.id == uuid.Nil {
+		return fmt.Errorf("sale item id is empty: %w", ErrInvalidConfiguration)
+	}
+
+	if item.saleID == uuid.Nil {
+		return fmt.Errorf("sale id is empty: %w", ErrInvalidConfiguration)
+	}
+
+	if item.productID == uuid.Nil {
+		return fmt.Errorf("product id is empty: %w", ErrInvalidConfiguration)
+	}
+
 	if item.totalQty <= 0 {
 		return fmt.Errorf("total_qty must be > 0: %w", ErrInvalidQuantity)
 	}
@@ -232,8 +377,13 @@ func validateSaleItem(item SaleItem) error {
 		return fmt.Errorf("sold_qty must be >= 0: %w", ErrInvalidQuantity)
 	}
 
-	if item.soldQty+item.reservedQty > item.totalQty {
+	if item.reservedQty > item.totalQty ||
+		item.soldQty > item.totalQty-item.reservedQty {
 		return fmt.Errorf("invalid quantity mathematics: %w", ErrInvalidQuantity)
+	}
+
+	if item.price.AmountMinor() <= 0 {
+		return fmt.Errorf("price must be > 0: %w", ErrInvalidMoney)
 	}
 
 	return nil
