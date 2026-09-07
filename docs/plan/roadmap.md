@@ -23,6 +23,8 @@ Gate: unit-тесты state machines; ни один terminal state не пере
 
 ## Milestone 2 — PostgreSQL и flashsale
 
+Состояние: выполнено (2026-09-07). Итоговая проверка: [m2-summary.md](../milestones/m2-summary.md).
+
 - Создать SQL migrations для users, sales, sale_items, reservations и orders.
 - Реализовать PostgreSQL adapter для flashsale.
 - Reserve выполнять условным UPDATE доступного Stock и созданием Reservation в одной транзакции.
