@@ -2,11 +2,9 @@ package flashsale_postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyeart/flashdrop/internal/flashsale"
 )
@@ -113,63 +111,9 @@ func (s *Store) FindSale(
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
-	var saleSnapshot flashsale.SaleSnapshot
-	sales_query := `
-		SELECT id, state, starts_at, ends_at, created_at 
-		FROM flashdrop.sales 
-		WHERE id = $1;
-	`
-	err = tx.QueryRow(ctx, sales_query, id).Scan(
-		&saleSnapshot.ID, &saleSnapshot.State,
-		&saleSnapshot.StartsAt, &saleSnapshot.EndsAt,
-		&saleSnapshot.CreatedAt,
-	)
+	saleSnapshot, err := selectSaleSnapshot(ctx, tx, id, false)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return flashsale.Sale{}, fmt.Errorf(
-				"sale with id %s not found: %w",
-				id, flashsale.ErrSaleNotFound,
-			)
-		}
-
-		return flashsale.Sale{}, fmt.Errorf("scan sale: %w", err)
-	}
-
-	saleSnapshot.Items = make([]flashsale.SaleItemSnapshot, 0)
-	sale_items_query := `
-		SELECT 
-			id, sale_id, product_id, name, price_minor, 
-			total_qty, reserved_qty, sold_qty 
-		FROM flashdrop.sale_items 
-		WHERE sale_id = $1 
-		ORDER BY id ASC;
-	`
-	rows, err := tx.Query(ctx, sale_items_query, id)
-	if err != nil {
-		return flashsale.Sale{}, fmt.Errorf("query error: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var itemSnapshot flashsale.SaleItemSnapshot
-
-		err := rows.Scan(
-			&itemSnapshot.ID, &itemSnapshot.SaleID,
-			&itemSnapshot.ProductID, &itemSnapshot.Name,
-			&itemSnapshot.PriceMinor, &itemSnapshot.TotalQty,
-			&itemSnapshot.ReservedQty, &itemSnapshot.SoldQty,
-		)
-		if err != nil {
-			return flashsale.Sale{}, fmt.Errorf(
-				"scan item: %w", err,
-			)
-		}
-
-		saleSnapshot.Items = append(saleSnapshot.Items, itemSnapshot)
-	}
-
-	if err := rows.Err(); err != nil {
-		return flashsale.Sale{}, fmt.Errorf("rows error: %w", err)
+		return flashsale.Sale{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

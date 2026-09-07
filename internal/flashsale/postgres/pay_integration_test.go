@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yyeart/flashdrop/internal/flashsale"
-	flashsale_postgres "github.com/yyeart/flashdrop/internal/flashsale/postgres"
 )
 
 const payConcurrencyAttempts = 100
@@ -68,34 +67,23 @@ func TestStore_Pay_UnknownReservation(t *testing.T) {
 
 func TestStore_Pay_ExpiredReservationDoesNotChangeStateOrStock(t *testing.T) {
 	fixture := newReserveFixture(t, 2, flashsale.ActiveState)
-	reservation, err := flashsale.NewReservation(
-		uuid.New(),
-		fixture.userID,
-		fixture.itemID,
-		1,
-		fixture.now.Add(-2*time.Minute),
-		fixture.now.Add(-time.Minute),
-	)
-	if err != nil {
-		t.Fatalf("NewReservation() error = %v", err)
-	}
+	reservation := newReservation(t, fixture, uuid.New(), 1)
 
 	reserveContext, reserveCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer reserveCancel()
-	if _, err := fixture.store.Reserve(
+	reserveResult, err := fixture.store.Reserve(
 		reserveContext,
-		flashsale_postgres.ReserveCommand{
-			Reservation:    reservation,
-			IdempotencyKey: uuid.NewString(),
-		},
+		newReserveCommand(reservation, uuid.NewString()),
 		fixture.now,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
+	reservation = reserveResult.Reservation
 
 	payContext, payCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer payCancel()
-	_, err = fixture.store.Pay(payContext, reservation.ID(), uuid.New(), fixture.now)
+	_, err = fixture.store.Pay(payContext, reservation.ID(), uuid.New(), reservation.ExpiresAt())
 	if !errors.Is(err, flashsale.ErrExpiredTimeWindow) {
 		t.Fatalf("Pay() error = %v, want errors.Is(..., ErrExpiredTimeWindow)", err)
 	}
@@ -253,18 +241,16 @@ func reserveForPay(
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Reserve(
+	result, err := fixture.store.Reserve(
 		ctx,
-		flashsale_postgres.ReserveCommand{
-			Reservation:    reservation,
-			IdempotencyKey: uuid.NewString(),
-		},
+		newReserveCommand(reservation, uuid.NewString()),
 		fixture.now,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
 
-	return reservation
+	return result.Reservation
 }
 
 func readReservationState(

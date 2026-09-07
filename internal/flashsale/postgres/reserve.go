@@ -15,7 +15,12 @@ import (
 )
 
 type ReserveCommand struct {
-	Reservation    flashsale.Reservation
+	ReservationID uuid.UUID
+	UserID        uuid.UUID
+	SaleItemID    uuid.UUID
+	Quantity      int
+	ExpiresAt     time.Time
+
 	IdempotencyKey string
 }
 
@@ -46,9 +51,15 @@ func (s *Store) Reserve(
 	cmd ReserveCommand,
 	now time.Time,
 ) (ReserveResult, error) {
-	reservationSnapshot, err := validateReserveReservation(cmd.Reservation)
-	if err != nil {
+	if err := validateReserveCommand(cmd); err != nil {
 		return ReserveResult{}, err
+	}
+
+	now = now.UTC()
+
+	requestHash, err := hashReserveCommand(cmd)
+	if err != nil {
+		return ReserveResult{}, fmt.Errorf("hash error: %w", err)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -59,13 +70,10 @@ func (s *Store) Reserve(
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
-	requestHash, err := hashReserveCommand(cmd)
-	if err != nil {
-		return ReserveResult{}, fmt.Errorf("hash error: %w", err)
-	}
-
 	idempotency, err := registerIdempotencyRecord(
-		ctx, tx, cmd, reservationSnapshot, requestHash, now,
+		ctx, tx,
+		cmd.UserID, cmd.IdempotencyKey,
+		requestHash, now,
 	)
 	if err != nil {
 		return ReserveResult{}, err
@@ -82,11 +90,31 @@ func (s *Store) Reserve(
 		}, nil
 	}
 
+	reservationSnapshot := flashsale.ReservationSnapshot{
+		ID:         cmd.ReservationID,
+		UserID:     cmd.UserID,
+		SaleItemID: cmd.SaleItemID,
+		Quantity:   cmd.Quantity,
+		State:      flashsale.PendingState,
+		CreatedAt:  now,
+		ExpiresAt:  cmd.ExpiresAt.UTC(),
+	}
+
+	reservation, err := flashsale.RehydrateReservation(reservationSnapshot)
+	if err != nil {
+		return ReserveResult{}, fmt.Errorf(
+			"reservation validation: %w", err,
+		)
+	}
+
 	if err := reserveStock(ctx, tx, reservationSnapshot, now); err != nil {
 		return ReserveResult{}, err
 	}
 
-	if err := persistReservationAndResult(ctx, tx, reservationSnapshot, idempotency.id); err != nil {
+	if err := persistReservationAndResult(
+		ctx, tx,
+		reservationSnapshot, idempotency.id,
+	); err != nil {
 		return ReserveResult{}, err
 	}
 
@@ -95,43 +123,44 @@ func (s *Store) Reserve(
 	}
 
 	return ReserveResult{
-		Reservation: cmd.Reservation,
+		Reservation: reservation,
 		Replayed:    false,
 	}, nil
 }
 
-func validateReserveReservation(
-	reservation flashsale.Reservation,
-) (flashsale.ReservationSnapshot, error) {
-	snapshot := flashsale.ReservationSnapshot{
-		ID:         reservation.ID(),
-		UserID:     reservation.UserID(),
-		SaleItemID: reservation.SaleItemID(),
-		Quantity:   reservation.Quantity(),
-		State:      reservation.State(),
-		CreatedAt:  reservation.CreatedAt(),
-		ExpiresAt:  reservation.ExpiresAt(),
+func validateReserveCommand(cmd ReserveCommand) error {
+	if cmd.UserID == uuid.Nil {
+		return fmt.Errorf("user_id is nil: %w", flashsale.ErrInvalidConfiguration)
 	}
 
-	if _, err := flashsale.RehydrateReservation(snapshot); err != nil {
-		return flashsale.ReservationSnapshot{}, fmt.Errorf("reservation validation: %w", err)
+	if cmd.ReservationID == uuid.Nil {
+		return fmt.Errorf("reservation_id is nil: %w", flashsale.ErrInvalidConfiguration)
 	}
 
-	if reservation.State() != flashsale.PendingState {
-		return flashsale.ReservationSnapshot{}, fmt.Errorf(
-			"reservation state must be pending: %w",
-			flashsale.ErrForbiddenTransition,
-		)
+	if cmd.SaleItemID == uuid.Nil {
+		return fmt.Errorf("sale_item_id is nil: %w", flashsale.ErrInvalidConfiguration)
 	}
 
-	return snapshot, nil
+	if cmd.Quantity <= 0 {
+		return fmt.Errorf("quantity must be > 0: %w", flashsale.ErrInvalidQuantity)
+	}
+
+	if cmd.IdempotencyKey == "" {
+		return fmt.Errorf("idempotency_key cannot be empty: %w", flashsale.ErrInvalidConfiguration)
+	}
+
+	if cmd.ExpiresAt.IsZero() {
+		return fmt.Errorf("expires_at cannot be zero: %w", flashsale.ErrInvalidConfiguration)
+	}
+
+	return nil
 }
 
 func registerIdempotencyRecord(
 	ctx context.Context,
 	tx pgx.Tx,
-	cmd ReserveCommand,
-	reservationSnapshot flashsale.ReservationSnapshot,
+	userID uuid.UUID,
+	idempotencyKey string,
 	requestHash string,
 	now time.Time,
 ) (idempotencyRecordResult, error) {
@@ -147,8 +176,8 @@ func registerIdempotencyRecord(
 	recordID := uuid.New()
 	if err := tx.QueryRow(
 		ctx, insertIdempotencyRecordQuery,
-		recordID, reservationSnapshot.UserID,
-		cmd.IdempotencyKey, requestHash,
+		recordID, userID,
+		idempotencyKey, requestHash,
 		now,
 	).Scan(&recordID); err == nil {
 		return idempotencyRecordResult{id: recordID}, nil
@@ -157,7 +186,7 @@ func registerIdempotencyRecord(
 	}
 
 	reservation, err := handleExistingRecord(
-		ctx, tx, cmd.IdempotencyKey, reservationSnapshot.UserID, requestHash,
+		ctx, tx, idempotencyKey, userID, requestHash,
 	)
 	if err != nil {
 		return idempotencyRecordResult{}, err
@@ -256,18 +285,11 @@ func persistReservationAndResult(
 }
 
 func hashReserveCommand(cmd ReserveCommand) (string, error) {
-	if cmd.IdempotencyKey == "" {
-		return "", fmt.Errorf(
-			"idempotency key cant be empty: %w",
-			flashsale.ErrInvalidConfiguration,
-		)
-	}
-
 	payload := reservePayload{
-		UserID:     cmd.Reservation.UserID(),
-		SaleItemID: cmd.Reservation.SaleItemID(),
-		Quantity:   cmd.Reservation.Quantity(),
-		ExpiresAt:  cmd.Reservation.ExpiresAt().UTC(),
+		UserID:     cmd.UserID,
+		SaleItemID: cmd.SaleItemID,
+		Quantity:   cmd.Quantity,
+		ExpiresAt:  cmd.ExpiresAt.UTC(),
 	}
 
 	raw, err := json.Marshal(payload)

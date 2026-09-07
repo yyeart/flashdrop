@@ -48,6 +48,219 @@ func TestStore_ActivateSale_ActivatesDraftSaleWithItems(t *testing.T) {
 	assertSaleItemsEqual(t, want.Items(), persisted.Items())
 }
 
+func TestStore_EndSale_EndsActiveSaleWithItems(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	want := newActiveSale(t)
+	cleanupSale(t, pool, want.ID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	if err := store.CreateSale(ctx, want); err != nil {
+		t.Fatalf("CreateSale() error = %v", err)
+	}
+
+	got, err := store.EndSale(ctx, want.ID())
+	if err != nil {
+		t.Fatalf("EndSale() error = %v", err)
+	}
+
+	if got.State() != flashsale.EndedState {
+		t.Fatalf("EndSale() state = %q, want %q", got.State(), flashsale.EndedState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, want, got)
+	assertSaleItemsByID(t, want, got)
+
+	persisted, err := store.FindSale(ctx, want.ID())
+	if err != nil {
+		t.Fatalf("FindSale() after EndSale() error = %v", err)
+	}
+	if persisted.State() != flashsale.EndedState {
+		t.Fatalf("persisted state = %q, want %q", persisted.State(), flashsale.EndedState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, want, persisted)
+	assertSaleItemsByID(t, want, persisted)
+}
+
+func TestStore_EndSale_RejectsDraftWithoutChanges(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	sale := newDraftSaleWithItem(t, uuid.New())
+	cleanupSale(t, pool, sale.ID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	if err := store.CreateSale(ctx, sale); err != nil {
+		t.Fatalf("CreateSale() error = %v", err)
+	}
+
+	_, err := store.EndSale(ctx, sale.ID())
+	if !errors.Is(err, flashsale.ErrForbiddenTransition) {
+		t.Fatalf("EndSale() error = %v, want errors.Is(..., ErrForbiddenTransition)", err)
+	}
+
+	persisted, err := store.FindSale(ctx, sale.ID())
+	if err != nil {
+		t.Fatalf("FindSale() after rejected EndSale() error = %v", err)
+	}
+	if persisted.State() != flashsale.DraftState {
+		t.Fatalf("state after rejected EndSale() = %q, want %q", persisted.State(), flashsale.DraftState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, sale, persisted)
+	assertSaleItemsByID(t, sale, persisted)
+}
+
+func TestStore_EndSale_RejectsRepeatedEnding(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	sale := newActiveSale(t)
+	cleanupSale(t, pool, sale.ID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	if err := store.CreateSale(ctx, sale); err != nil {
+		t.Fatalf("CreateSale() error = %v", err)
+	}
+
+	if _, err := store.EndSale(ctx, sale.ID()); err != nil {
+		t.Fatalf("first EndSale() error = %v", err)
+	}
+
+	_, err := store.EndSale(ctx, sale.ID())
+	if !errors.Is(err, flashsale.ErrForbiddenTransition) {
+		t.Fatalf("second EndSale() error = %v, want errors.Is(..., ErrForbiddenTransition)", err)
+	}
+
+	persisted, err := store.FindSale(ctx, sale.ID())
+	if err != nil {
+		t.Fatalf("FindSale() after repeated EndSale() error = %v", err)
+	}
+	if persisted.State() != flashsale.EndedState {
+		t.Fatalf("state after repeated EndSale() = %q, want %q", persisted.State(), flashsale.EndedState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, sale, persisted)
+	assertSaleItemsByID(t, sale, persisted)
+}
+
+func TestStore_EndSale_ConcurrentCallsHaveOneWinner(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	sale := newActiveSale(t)
+	cleanupSale(t, pool, sale.ID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	if err := store.CreateSale(ctx, sale); err != nil {
+		t.Fatalf("CreateSale() error = %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := store.EndSale(ctx, sale.ID())
+			results <- err
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var successes, forbidden int
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, flashsale.ErrForbiddenTransition):
+			forbidden++
+		default:
+			t.Errorf("EndSale() concurrent error = %v, want nil or ErrForbiddenTransition", err)
+		}
+	}
+
+	if successes != 1 || forbidden != 1 {
+		t.Fatalf(
+			"concurrent EndSale() results: successes = %d, forbidden = %d, want 1 and 1",
+			successes, forbidden,
+		)
+	}
+
+	persisted, err := store.FindSale(ctx, sale.ID())
+	if err != nil {
+		t.Fatalf("FindSale() after concurrent EndSale() error = %v", err)
+	}
+	if persisted.State() != flashsale.EndedState {
+		t.Fatalf("persisted state = %q, want %q", persisted.State(), flashsale.EndedState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, sale, persisted)
+	assertSaleItemsByID(t, sale, persisted)
+}
+
+func TestStore_EndSale_UnknownSaleReturnsNotFound(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	saleID := uuid.New()
+	_, err := store.EndSale(ctx, saleID)
+	if !errors.Is(err, flashsale.ErrSaleNotFound) {
+		t.Fatalf("EndSale() error = %v, want errors.Is(..., ErrSaleNotFound)", err)
+	}
+	if saleExists(t, pool, saleID) {
+		t.Fatalf("unknown sale %s appeared after rejected EndSale()", saleID)
+	}
+}
+
+func TestStore_EndSale_CanceledContextDoesNotPersist(t *testing.T) {
+	pool := openTestPool(t)
+	store := flashsale_postgres.NewStore(pool)
+
+	sale := newActiveSale(t)
+	cleanupSale(t, pool, sale.ID())
+
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer setupCancel()
+	if err := store.CreateSale(setupCtx, sale); err != nil {
+		t.Fatalf("CreateSale() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := store.EndSale(ctx, sale.ID())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("EndSale() error = %v, want errors.Is(..., context.Canceled)", err)
+	}
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer checkCancel()
+	persisted, err := store.FindSale(checkCtx, sale.ID())
+	if err != nil {
+		t.Fatalf("FindSale() after canceled EndSale() error = %v", err)
+	}
+	if persisted.State() != flashsale.ActiveState {
+		t.Fatalf("state after canceled EndSale() = %q, want %q", persisted.State(), flashsale.ActiveState)
+	}
+	assertSaleFieldsEqualIgnoringState(t, sale, persisted)
+	assertSaleItemsByID(t, sale, persisted)
+}
+
 func TestStore_ActivateSale_RejectsInvalidTransitionsWithoutChanges(t *testing.T) {
 	t.Run("draft without items", func(t *testing.T) {
 		pool := openTestPool(t)
@@ -211,6 +424,24 @@ func assertActivationErrorLeavesState(
 	}
 	if persisted.State() != sale.State() {
 		t.Fatalf("state after rejected ActivateSale() = %q, want %q", persisted.State(), sale.State())
+	}
+}
+
+func assertSaleItemsByID(t *testing.T, want, got flashsale.Sale) {
+	t.Helper()
+
+	wantItems := want.Items()
+	gotItems := got.Items()
+	if len(gotItems) != len(wantItems) {
+		t.Fatalf("len(Items()) = %d, want %d", len(gotItems), len(wantItems))
+	}
+
+	for index, wantItem := range wantItems {
+		gotItem, ok := got.Item(wantItem.ID())
+		if !ok {
+			t.Fatalf("item %s was not persisted", wantItem.ID())
+		}
+		assertSaleItemEqual(t, index, wantItem, gotItem)
 	}
 }
 

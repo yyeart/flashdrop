@@ -36,16 +36,15 @@ func TestStore_Reserve_CreatesPendingReservationAndIncrementsStock(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Reserve(
+	result, err := fixture.store.Reserve(
 		ctx,
-		flashsale_postgres.ReserveCommand{
-			Reservation:    reservation,
-			IdempotencyKey: uuid.NewString(),
-		},
+		newReserveCommand(reservation, uuid.NewString()),
 		fixture.now,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
+	reservation = result.Reservation
 
 	totalQty, reservedQty, soldQty := readStock(t, fixture)
 	if totalQty != fixture.totalQty || reservedQty != 2 || soldQty != 0 {
@@ -100,10 +99,7 @@ func TestStore_Reserve_RejectsUnavailableStockWithoutChanges(t *testing.T) {
 
 	_, err := fixture.store.Reserve(
 		ctx,
-		flashsale_postgres.ReserveCommand{
-			Reservation:    reservation,
-			IdempotencyKey: idempotencyKey,
-		},
+		newReserveCommand(reservation, idempotencyKey),
 		fixture.now,
 	)
 	if !errors.Is(err, flashsale.ErrReservationUnavailable) {
@@ -125,6 +121,115 @@ func TestStore_Reserve_RejectsUnavailableStockWithoutChanges(t *testing.T) {
 	}
 }
 
+func TestStore_Reserve_RejectsInvalidCommandWithoutChanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*flashsale_postgres.ReserveCommand, time.Time)
+		wantErr error
+	}{
+		{
+			name: "empty reservation ID",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.ReservationID = uuid.Nil
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "empty user ID",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.UserID = uuid.Nil
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "empty sale item ID",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.SaleItemID = uuid.Nil
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "zero quantity",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.Quantity = 0
+			},
+			wantErr: flashsale.ErrInvalidQuantity,
+		},
+		{
+			name: "negative quantity",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.Quantity = -1
+			},
+			wantErr: flashsale.ErrInvalidQuantity,
+		},
+		{
+			name: "zero expiration time",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.ExpiresAt = time.Time{}
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "expiration equals creation time",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, now time.Time) {
+				cmd.ExpiresAt = now
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "expiration precedes creation time",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, now time.Time) {
+				cmd.ExpiresAt = now.Add(-time.Second)
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+		{
+			name: "empty idempotency key",
+			mutate: func(cmd *flashsale_postgres.ReserveCommand, _ time.Time) {
+				cmd.IdempotencyKey = ""
+			},
+			wantErr: flashsale.ErrInvalidConfiguration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newReserveFixture(t, 5, flashsale.ActiveState)
+			cmd := flashsale_postgres.ReserveCommand{
+				ReservationID:  uuid.New(),
+				UserID:         fixture.userID,
+				SaleItemID:     fixture.itemID,
+				Quantity:       1,
+				ExpiresAt:      fixture.now.Add(5 * time.Minute),
+				IdempotencyKey: uuid.NewString(),
+			}
+			tt.mutate(&cmd, fixture.now)
+
+			ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+			defer cancel()
+
+			_, err := fixture.store.Reserve(ctx, cmd, fixture.now)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Reserve() error = %v, want errors.Is(..., %v)", err, tt.wantErr)
+			}
+
+			totalQty, reservedQty, soldQty := readStock(t, fixture)
+			if totalQty != fixture.totalQty || reservedQty != 0 || soldQty != 0 {
+				t.Fatalf(
+					"stock = (%d, %d, %d), want (%d, 0, 0)",
+					totalQty, reservedQty, soldQty, fixture.totalQty,
+				)
+			}
+			if countReservations(t, fixture) != 0 {
+				t.Fatal("reservation was persisted after invalid command")
+			}
+			if countIdempotencyRecords(t, fixture, cmd.IdempotencyKey) != 0 {
+				t.Fatal("idempotency record was persisted after invalid command")
+			}
+		})
+	}
+}
+
 func TestStore_Reserve_ReplaysSameIdempotentRequest(t *testing.T) {
 	fixture := newReserveFixture(t, 5, flashsale.ActiveState)
 	idempotencyKey := uuid.NewString()
@@ -134,10 +239,11 @@ func TestStore_Reserve_ReplaysSameIdempotentRequest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	firstResult, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    firstReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now)
+	firstResult, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(firstReservation, idempotencyKey),
+		fixture.now,
+	)
 	if err != nil {
 		t.Fatalf("first Reserve() error = %v", err)
 	}
@@ -145,10 +251,12 @@ func TestStore_Reserve_ReplaysSameIdempotentRequest(t *testing.T) {
 		t.Fatal("first Reserve() result is marked as replayed")
 	}
 
-	secondResult, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    secondReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now)
+	replayNow := firstReservation.ExpiresAt().Add(time.Minute)
+	secondResult, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(secondReservation, idempotencyKey),
+		replayNow,
+	)
 	if err != nil {
 		t.Fatalf("second Reserve() error = %v", err)
 	}
@@ -159,6 +267,18 @@ func TestStore_Reserve_ReplaysSameIdempotentRequest(t *testing.T) {
 		t.Fatalf(
 			"replayed reservation ID = %s, want %s",
 			secondResult.Reservation.ID(), firstResult.Reservation.ID(),
+		)
+	}
+	if !firstResult.Reservation.CreatedAt().Equal(fixture.now) {
+		t.Fatalf(
+			"first reservation CreatedAt() = %v, want %v",
+			firstResult.Reservation.CreatedAt(), fixture.now,
+		)
+	}
+	if !secondResult.Reservation.CreatedAt().Equal(firstResult.Reservation.CreatedAt()) {
+		t.Fatalf(
+			"replayed reservation CreatedAt() = %v, want %v",
+			secondResult.Reservation.CreatedAt(), firstResult.Reservation.CreatedAt(),
 		)
 	}
 
@@ -183,17 +303,19 @@ func TestStore_Reserve_RejectsIdempotencyPayloadConflict(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    firstReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now); err != nil {
+	if _, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(firstReservation, idempotencyKey),
+		fixture.now,
+	); err != nil {
 		t.Fatalf("first Reserve() error = %v", err)
 	}
 
-	_, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    secondReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now)
+	_, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(secondReservation, idempotencyKey),
+		fixture.now,
+	)
 	if !errors.Is(err, flashsale.ErrConflict) {
 		t.Fatalf("second Reserve() error = %v, want errors.Is(..., ErrConflict)", err)
 	}
@@ -231,10 +353,11 @@ func TestStore_Reserve_ConcurrentSameIdempotencyKeyCreatesOneReservation(t *test
 		wg.Add(1)
 		go func(reservation flashsale.Reservation) {
 			defer wg.Done()
-			result, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-				Reservation:    reservation,
-				IdempotencyKey: idempotencyKey,
-			}, fixture.now)
+			result, err := fixture.store.Reserve(
+				ctx,
+				newReserveCommand(reservation, idempotencyKey),
+				fixture.now,
+			)
 			results <- reserveOutcome{result: result, err: err}
 		}(reservation)
 	}
@@ -340,16 +463,18 @@ func TestStore_Reserve_AllowsSameIdempotencyKeyForDifferentUsers(t *testing.T) {
 		t.Fatalf("NewReservation() for second user error = %v", err)
 	}
 
-	if _, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    firstReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now); err != nil {
+	if _, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(firstReservation, idempotencyKey),
+		fixture.now,
+	); err != nil {
 		t.Fatalf("first Reserve() error = %v", err)
 	}
-	if _, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    secondReservation,
-		IdempotencyKey: idempotencyKey,
-	}, fixture.now); err != nil {
+	if _, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(secondReservation, idempotencyKey),
+		fixture.now,
+	); err != nil {
 		t.Fatalf("second Reserve() error = %v", err)
 	}
 
@@ -404,10 +529,11 @@ func assertReserveUnavailable(t *testing.T, fixture *reserveFixture, now time.Ti
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	_, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    reservation,
-		IdempotencyKey: uuid.NewString(),
-	}, now)
+	_, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(reservation, uuid.NewString()),
+		now,
+	)
 	if !errors.Is(err, flashsale.ErrReservationUnavailable) {
 		t.Fatalf(
 			"Reserve() error = %v, want errors.Is(..., ErrReservationUnavailable)",
@@ -433,17 +559,19 @@ func TestStore_Reserve_ConflictingReservationIDRollsBackStock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    first,
-		IdempotencyKey: uuid.NewString(),
-	}, fixture.now); err != nil {
+	if _, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(first, uuid.NewString()),
+		fixture.now,
+	); err != nil {
 		t.Fatalf("Reserve(first) error = %v", err)
 	}
 
-	_, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-		Reservation:    second,
-		IdempotencyKey: uuid.NewString(),
-	}, fixture.now)
+	_, err := fixture.store.Reserve(
+		ctx,
+		newReserveCommand(second, uuid.NewString()),
+		fixture.now,
+	)
 	if !errors.Is(err, flashsale.ErrConflict) {
 		t.Fatalf("Reserve(second) error = %v, want errors.Is(..., ErrConflict)", err)
 	}
@@ -466,10 +594,7 @@ func TestStore_Reserve_CanceledContextDoesNotPersist(t *testing.T) {
 
 	_, err := fixture.store.Reserve(
 		ctx,
-		flashsale_postgres.ReserveCommand{
-			Reservation:    reservation,
-			IdempotencyKey: uuid.NewString(),
-		},
+		newReserveCommand(reservation, uuid.NewString()),
 		fixture.now,
 	)
 	if !errors.Is(err, context.Canceled) {
@@ -501,10 +626,11 @@ func TestStore_Reserve_ConcurrentRequestsDoNotOversell(t *testing.T) {
 		wg.Add(1)
 		go func(reservation flashsale.Reservation) {
 			defer wg.Done()
-			_, err := fixture.store.Reserve(ctx, flashsale_postgres.ReserveCommand{
-				Reservation:    reservation,
-				IdempotencyKey: uuid.NewString(),
-			}, fixture.now)
+			_, err := fixture.store.Reserve(
+				ctx,
+				newReserveCommand(reservation, uuid.NewString()),
+				fixture.now,
+			)
 			results <- err
 		}(reservation)
 	}
@@ -700,6 +826,20 @@ func newReservation(
 	}
 
 	return reservation
+}
+
+func newReserveCommand(
+	reservation flashsale.Reservation,
+	idempotencyKey string,
+) flashsale_postgres.ReserveCommand {
+	return flashsale_postgres.ReserveCommand{
+		ReservationID:  reservation.ID(),
+		UserID:         reservation.UserID(),
+		SaleItemID:     reservation.SaleItemID(),
+		Quantity:       reservation.Quantity(),
+		ExpiresAt:      reservation.ExpiresAt(),
+		IdempotencyKey: idempotencyKey,
+	}
 }
 
 func readStock(t *testing.T, fixture *reserveFixture) (totalQty, reservedQty, soldQty int) {
