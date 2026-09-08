@@ -36,8 +36,9 @@ func main() {
 	if err := run(
 		ctx,
 		config.ShutdownTimeout,
-		func(ctx context.Context) {
+		func(ctx context.Context) error {
 			<-ctx.Done()
+			return nil
 		},
 	); err != nil {
 		logger.Error("worker error", "err", err)
