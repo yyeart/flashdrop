@@ -13,6 +13,7 @@ import (
 
 func (s *Store) Cancel(
 	ctx context.Context,
+	userID uuid.UUID,
 	reservationID uuid.UUID,
 	now time.Time,
 ) error {
@@ -24,7 +25,7 @@ func (s *Store) Cancel(
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
-	reservation, err := selectReservation(ctx, tx, reservationID)
+	reservation, err := selectReservationForUser(ctx, tx, reservationID, userID)
 	if err != nil {
 		return err
 	}
@@ -96,38 +97,72 @@ func selectReservation(
 	tx pgx.Tx,
 	reservationID uuid.UUID,
 ) (flashsale.Reservation, error) {
-	var reservationSnapshot flashsale.ReservationSnapshot
-	selectReservationQuery := `
+	return selectReservationForUpdate(ctx, tx, reservationID, nil)
+}
+
+func selectReservationForUser(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservationID uuid.UUID,
+	userID uuid.UUID,
+) (flashsale.Reservation, error) {
+	return selectReservationForUpdate(ctx, tx, reservationID, &userID)
+}
+
+func selectReservationForUpdate(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservationID uuid.UUID,
+	userID *uuid.UUID,
+) (flashsale.Reservation, error) {
+	query := `
 		SELECT
 			id, user_id, sale_item_id,
 			quantity, state,
 			created_at, expires_at
 		FROM flashdrop.reservations
 		WHERE id = $1
-		FOR UPDATE;
 	`
-	if err := tx.QueryRow(ctx, selectReservationQuery, reservationID).Scan(
-		&reservationSnapshot.ID,
-		&reservationSnapshot.UserID,
-		&reservationSnapshot.SaleItemID,
-		&reservationSnapshot.Quantity,
-		&reservationSnapshot.State,
-		&reservationSnapshot.CreatedAt,
-		&reservationSnapshot.ExpiresAt,
-	); err != nil {
+
+	args := []any{reservationID}
+
+	if userID != nil {
+		query += ` AND user_id = $2`
+		args = append(args, *userID)
+	}
+
+	query += ` FOR UPDATE;`
+
+	var snapshot flashsale.ReservationSnapshot
+
+	err := tx.QueryRow(ctx, query, args...).Scan(
+		&snapshot.ID,
+		&snapshot.UserID,
+		&snapshot.SaleItemID,
+		&snapshot.Quantity,
+		&snapshot.State,
+		&snapshot.CreatedAt,
+		&snapshot.ExpiresAt,
+	)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return flashsale.Reservation{}, fmt.Errorf(
 				"reservation with id %s not found: %w",
-				reservationID, flashsale.ErrReservationNotFound,
+				reservationID,
+				flashsale.ErrReservationNotFound,
 			)
 		}
 
-		return flashsale.Reservation{}, mapDatabaseError("scan reservation", err)
+		return flashsale.Reservation{},
+			mapDatabaseError("scan reservation", err)
 	}
 
-	reservation, err := flashsale.RehydrateReservation(reservationSnapshot)
+	reservation, err := flashsale.RehydrateReservation(snapshot)
 	if err != nil {
-		return flashsale.Reservation{}, fmt.Errorf("reservation validation: %w", err)
+		return flashsale.Reservation{}, fmt.Errorf(
+			"rehydrate reservation: %w",
+			err,
+		)
 	}
 
 	return reservation, nil

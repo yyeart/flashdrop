@@ -17,12 +17,15 @@ func TestStore_FindOrder_ReturnsPersistedOrderAfterPay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	want, err := fixture.store.Pay(ctx, reservation.ID(), orderID, fixture.now)
+	want, err := fixture.store.Pay(
+		ctx, fixture.userID,
+		reservation.ID(), orderID, fixture.now,
+	)
 	if err != nil {
 		t.Fatalf("Pay() error = %v", err)
 	}
 
-	got, err := fixture.store.FindOrder(ctx, orderID)
+	got, err := fixture.store.FindOrder(ctx, fixture.userID, orderID)
 	if err != nil {
 		t.Fatalf("FindOrder() error = %v", err)
 	}
@@ -43,7 +46,29 @@ func TestStore_FindOrder_UnknownIDReturnsNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	_, err := fixture.store.FindOrder(ctx, uuid.New())
+	_, err := fixture.store.FindOrder(ctx, fixture.userID, uuid.New())
+	if !errors.Is(err, flashsale.ErrOrderNotFound) {
+		t.Fatalf("FindOrder() error = %v, want errors.Is(..., ErrOrderNotFound)", err)
+	}
+}
+
+func TestStore_FindOrder_ForeignOrderReturnsNotFound(t *testing.T) {
+	fixture := newReserveFixture(t, 2, flashsale.ActiveState)
+	reservation := reserveForPay(t, fixture, uuid.New(), 1)
+	foreignUserID := createFixtureUser(t, fixture)
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	order, err := fixture.store.Pay(
+		ctx, fixture.userID,
+		reservation.ID(), uuid.New(), fixture.now,
+	)
+	if err != nil {
+		t.Fatalf("Pay() error = %v", err)
+	}
+
+	_, err = fixture.store.FindOrder(ctx, foreignUserID, order.ID())
 	if !errors.Is(err, flashsale.ErrOrderNotFound) {
 		t.Fatalf("FindOrder() error = %v, want errors.Is(..., ErrOrderNotFound)", err)
 	}
@@ -54,7 +79,7 @@ func TestStore_FindOrder_CanceledContextReturnsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fixture.store.FindOrder(ctx, uuid.New())
+	_, err := fixture.store.FindOrder(ctx, fixture.userID, uuid.New())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("FindOrder() error = %v, want errors.Is(..., context.Canceled)", err)
 	}
@@ -67,7 +92,7 @@ func TestStore_FindOrder_PendingReservationHasNoOrderAndDoesNotMutateState(t *te
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	_, err := fixture.store.FindOrder(ctx, uuid.New())
+	_, err := fixture.store.FindOrder(ctx, fixture.userID, uuid.New())
 	if !errors.Is(err, flashsale.ErrOrderNotFound) {
 		t.Fatalf("FindOrder() error = %v, want errors.Is(..., ErrOrderNotFound)", err)
 	}

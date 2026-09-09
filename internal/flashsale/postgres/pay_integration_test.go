@@ -21,7 +21,7 @@ func TestStore_Pay_CreatesOrderAndMovesStock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	order, err := fixture.store.Pay(ctx, reservation.ID(), orderID, fixture.now)
+	order, err := fixture.store.Pay(ctx, fixture.userID, reservation.ID(), orderID, fixture.now)
 	if err != nil {
 		t.Fatalf("Pay() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestStore_Pay_UnknownReservation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	_, err := fixture.store.Pay(ctx, unknownID, uuid.New(), fixture.now)
+	_, err := fixture.store.Pay(ctx, fixture.userID, unknownID, uuid.New(), fixture.now)
 	if !errors.Is(err, flashsale.ErrReservationNotFound) {
 		t.Fatalf("Pay() error = %v, want errors.Is(..., ErrReservationNotFound)", err)
 	}
@@ -62,6 +62,34 @@ func TestStore_Pay_UnknownReservation(t *testing.T) {
 	totalQty, reservedQty, soldQty := readStock(t, fixture)
 	if totalQty != fixture.totalQty || reservedQty != 0 || soldQty != 0 {
 		t.Fatalf("stock = (%d, %d, %d), want (%d, 0, 0)", totalQty, reservedQty, soldQty, fixture.totalQty)
+	}
+}
+
+func TestStore_Pay_ForeignReservationReturnsNotFoundWithoutChanges(t *testing.T) {
+	fixture := newReserveFixture(t, 2, flashsale.ActiveState)
+	reservation := reserveForPay(t, fixture, uuid.New(), 1)
+	foreignUserID := createFixtureUser(t, fixture)
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	_, err := fixture.store.Pay(
+		ctx, foreignUserID,
+		reservation.ID(), uuid.New(), fixture.now,
+	)
+	if !errors.Is(err, flashsale.ErrReservationNotFound) {
+		t.Fatalf("Pay() error = %v, want errors.Is(..., ErrReservationNotFound)", err)
+	}
+
+	if state := readReservationState(t, fixture, reservation.ID()); state != flashsale.PendingState {
+		t.Fatalf("reservation state = %q, want %q", state, flashsale.PendingState)
+	}
+	totalQty, reservedQty, soldQty := readStock(t, fixture)
+	if totalQty != fixture.totalQty || reservedQty != 1 || soldQty != 0 {
+		t.Fatalf("stock = (%d, %d, %d), want (%d, 1, 0)", totalQty, reservedQty, soldQty, fixture.totalQty)
+	}
+	if countOrders(t, fixture, reservation.ID()) != 0 {
+		t.Fatal("order was persisted after foreign Pay")
 	}
 }
 
@@ -83,7 +111,10 @@ func TestStore_Pay_ExpiredReservationDoesNotChangeStateOrStock(t *testing.T) {
 
 	payContext, payCancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer payCancel()
-	_, err = fixture.store.Pay(payContext, reservation.ID(), uuid.New(), reservation.ExpiresAt())
+	_, err = fixture.store.Pay(
+		payContext, fixture.userID,
+		reservation.ID(), uuid.New(), reservation.ExpiresAt(),
+	)
 	if !errors.Is(err, flashsale.ErrExpiredTimeWindow) {
 		t.Fatalf("Pay() error = %v, want errors.Is(..., ErrExpiredTimeWindow)", err)
 	}
@@ -107,11 +138,11 @@ func TestStore_Pay_TerminalReservationIsNotPaidAgain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Pay(ctx, reservation.ID(), uuid.New(), fixture.now); err != nil {
+	if _, err := fixture.store.Pay(ctx, fixture.userID, reservation.ID(), uuid.New(), fixture.now); err != nil {
 		t.Fatalf("Pay(first) error = %v", err)
 	}
 
-	_, err := fixture.store.Pay(ctx, reservation.ID(), uuid.New(), fixture.now)
+	_, err := fixture.store.Pay(ctx, fixture.userID, reservation.ID(), uuid.New(), fixture.now)
 	if !errors.Is(err, flashsale.ErrForbiddenTransition) {
 		t.Fatalf("Pay(second) error = %v, want errors.Is(..., ErrForbiddenTransition)", err)
 	}
@@ -137,11 +168,11 @@ func TestStore_Pay_OrderConflictRollsBackAllChanges(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if _, err := fixture.store.Pay(ctx, first.ID(), conflictingOrderID, fixture.now); err != nil {
+	if _, err := fixture.store.Pay(ctx, fixture.userID, first.ID(), conflictingOrderID, fixture.now); err != nil {
 		t.Fatalf("Pay(first) error = %v", err)
 	}
 
-	_, err := fixture.store.Pay(ctx, second.ID(), conflictingOrderID, fixture.now)
+	_, err := fixture.store.Pay(ctx, fixture.userID, second.ID(), conflictingOrderID, fixture.now)
 	if !errors.Is(err, flashsale.ErrConflict) {
 		t.Fatalf("Pay(second) error = %v, want errors.Is(..., ErrConflict)", err)
 	}
@@ -165,7 +196,7 @@ func TestStore_Pay_CanceledContextDoesNotPersist(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fixture.store.Pay(ctx, reservation.ID(), uuid.New(), fixture.now)
+	_, err := fixture.store.Pay(ctx, fixture.userID, reservation.ID(), uuid.New(), fixture.now)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Pay() error = %v, want errors.Is(..., context.Canceled)", err)
 	}
@@ -195,7 +226,10 @@ func TestStore_Pay_ConcurrentCallsHaveOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := fixture.store.Pay(ctx, reservation.ID(), uuid.New(), fixture.now)
+			_, err := fixture.store.Pay(
+				ctx, fixture.userID,
+				reservation.ID(), uuid.New(), fixture.now,
+			)
 			results <- err
 		}()
 	}
@@ -309,4 +343,37 @@ func countOrdersForItem(t *testing.T, fixture *reserveFixture) int {
 	}
 
 	return count
+}
+
+func createFixtureUser(t *testing.T, fixture *reserveFixture) uuid.UUID {
+	t.Helper()
+
+	userID := uuid.New()
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	if _, err := fixture.pool.Exec(
+		ctx,
+		`INSERT INTO flashdrop.users (id, role, created_at) VALUES ($1, $2, $3)`,
+		userID, "user", fixture.now.Add(-time.Hour),
+	); err != nil {
+		t.Fatalf("insert fixture user: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			context.Background(), postgresOperationTimeout,
+		)
+		defer cleanupCancel()
+
+		if _, err := fixture.pool.Exec(
+			cleanupCtx,
+			`DELETE FROM flashdrop.users WHERE id = $1`,
+			userID,
+		); err != nil {
+			t.Errorf("cleanup fixture user: %v", err)
+		}
+	})
+
+	return userID
 }

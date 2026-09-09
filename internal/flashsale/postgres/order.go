@@ -12,6 +12,7 @@ import (
 
 func (s *Store) FindOrder(
 	ctx context.Context,
+	userID uuid.UUID,
 	orderID uuid.UUID,
 ) (flashsale.Order, error) {
 	var orderSnapshot flashsale.OrderSnapshot
@@ -20,10 +21,10 @@ func (s *Store) FindOrder(
 			id, reservation_id, user_id,
 			sale_item_id, quantity, created_at
 		FROM flashdrop.orders 
-		WHERE id = $1;
+		WHERE id = $1 AND user_id = $2;
 	`
 
-	if err := s.pool.QueryRow(ctx, selectOrderQuery, orderID).Scan(
+	if err := s.pool.QueryRow(ctx, selectOrderQuery, orderID, userID).Scan(
 		&orderSnapshot.ID,
 		&orderSnapshot.ReservationID,
 		&orderSnapshot.UserID,
