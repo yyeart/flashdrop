@@ -8,7 +8,7 @@ test:
 
 test-integration: export FLASHDROP_TEST_DSN = postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:5432/$(POSTGRES_DB)?sslmode=disable&search_path=flashdrop,public
 test-integration:
-	@go test ./internal/flashsale/postgres -count=1
+	@go test ./internal/flashsale/postgres ./internal/identity/postgres -count=1
 
 lint:
 	@golangci-lint run ./...

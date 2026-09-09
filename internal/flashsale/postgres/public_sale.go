@@ -91,7 +91,7 @@ func (s *Store) FindActiveSale(
 		)
 	}
 	defer func() {
-		tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
+		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
 	saleSnapshot, err := selectSaleSnapshot(
