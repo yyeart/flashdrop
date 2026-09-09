@@ -1,0 +1,899 @@
+openapi: 3.1.2
+
+info:
+  title: FlashDrop HTTP API
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    Contract for the Milestone 3 HTTP API. Health checks and SSE are intentionally
+    excluded because they belong to later milestones.
+
+servers:
+  - url: /
+
+tags:
+  - name: Auth
+    description: Registration and access-token issuance.
+  - name: Sales
+    description: Public active-Sale queries.
+  - name: Reservations
+    description: Authenticated Reservation commands.
+  - name: Orders
+    description: Authenticated Order queries.
+  - name: Admin
+    description: Sale-management commands restricted to Administrators.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerUser
+      summary: Register a User
+      description: Registration always creates a User with the `user` role.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginUser
+      summary: Log in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Credentials accepted.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/sales:
+    get:
+      tags: [Sales]
+      operationId: listActiveSales
+      summary: List active Sales
+      description: Draft and ended Sales are not returned.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of active Sales in stable order.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/sales/{saleId}:
+    parameters:
+      - $ref: '#/components/parameters/SaleID'
+    get:
+      tags: [Sales]
+      operationId: getActiveSale
+      summary: Get an active Sale
+      description: Draft, ended, and unknown Sales are all reported as not found.
+      security: []
+      responses:
+        '200':
+          description: Active Sale found.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/reservations:
+    post:
+      tags: [Reservations]
+      operationId: reserveSaleItem
+      summary: Reserve a Sale Item
+      description: |
+        The authenticated User, Reservation ID, creation time, and expiration time
+        are supplied by the server. Replaying the same command with the same
+        Idempotency-Key returns the stored Reservation.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+      responses:
+        '200':
+          description: Idempotent replay of an existing Reservation.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '201':
+          description: Reservation created.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/reservations/{reservationId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ReservationID'
+    post:
+      tags: [Reservations]
+      operationId: cancelReservation
+      summary: Cancel the authenticated User's Reservation
+      responses:
+        '204':
+          description: Reservation cancelled. The response has no body.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/reservations/{reservationId}/pay:
+    parameters:
+      - $ref: '#/components/parameters/ReservationID'
+    post:
+      tags: [Reservations]
+      operationId: payReservation
+      summary: Pay the authenticated User's Reservation
+      description: The Order ID and creation time are supplied by the server.
+      responses:
+        '201':
+          description: Reservation paid and Order created.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Get the authenticated User's Order
+      description: Unknown Orders and Orders owned by another User are both reported as not found.
+      responses:
+        '200':
+          description: Order found.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/admin/sales:
+    post:
+      tags: [Admin]
+      operationId: createSale
+      summary: Create a draft Sale
+      description: Requires the `admin` role. The Sale ID and creation time are supplied by the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSaleRequest'
+      responses:
+        '201':
+          description: Draft Sale created.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/admin/sales/{saleId}/items:
+    parameters:
+      - $ref: '#/components/parameters/SaleID'
+    post:
+      tags: [Admin]
+      operationId: addSaleItem
+      summary: Add a Sale Item to a draft Sale
+      description: Requires the `admin` role. The Sale Item ID is supplied by the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddSaleItemRequest'
+      responses:
+        '201':
+          description: Sale Item created.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaleItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/admin/sales/{saleId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/SaleID'
+    post:
+      tags: [Admin]
+      operationId: activateSale
+      summary: Activate a draft Sale
+      description: Requires the `admin` role.
+      responses:
+        '200':
+          description: Sale activated.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /v1/admin/sales/{saleId}/end:
+    parameters:
+      - $ref: '#/components/parameters/SaleID'
+    post:
+      tags: [Admin]
+      operationId: endSale
+      summary: End an active Sale
+      description: Requires the `admin` role.
+      responses:
+        '200':
+          description: Sale ended.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Ed25519 access JWT sent as `Authorization: Bearer <token>`.'
+
+  headers:
+    RequestID:
+      description: Identifier assigned to the request by the server.
+      schema:
+        type: string
+        minLength: 1
+
+  parameters:
+    SaleID:
+      name: saleId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+    ReservationID:
+      name: reservationId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+    OrderID:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UUID'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Key unique within the authenticated User's scope.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, an invalid parameter, or failed validation.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Authentication is missing, malformed, invalid, or expired.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: The authenticated User does not have the required role.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: The resource is unknown, not public, or owned by another User.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    MethodNotAllowed:
+      description: The route exists, but the HTTP method is not allowed.
+      headers:
+        Allow:
+          description: Comma-separated HTTP methods accepted by this route.
+          schema:
+            type: string
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: A uniqueness, idempotency, Stock, or state-transition conflict occurred.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TooManyRequests:
+      description: The request was rejected by rate limiting.
+      headers:
+        Retry-After:
+          description: Seconds until the request may be retried.
+          schema:
+            type: integer
+            minimum: 0
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    InternalServerError:
+      description: An internal failure occurred; implementation details are not exposed.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    GatewayTimeout:
+      description: The operation did not complete before the request deadline.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+
+    DateTime:
+      type: string
+      format: date-time
+
+    Money:
+      type: string
+      description: Positive decimal amount with exactly two fractional digits.
+      pattern: '^(?:0\.(?:0[1-9]|[1-9][0-9])|[1-9][0-9]*\.[0-9]{2})$'
+      examples: ['12.50']
+
+    Role:
+      type: string
+      enum: [user, admin]
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          description: UTF-8 encoded value must contain 8 to 128 bytes.
+          x-minBytes: 8
+          x-maxBytes: 128
+          writeOnly: true
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          description: UTF-8 encoded value must contain 8 to 128 bytes.
+          x-minBytes: 8
+          x-maxBytes: 128
+          writeOnly: true
+
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, email, role, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+        created_at:
+          $ref: '#/components/schemas/DateTime'
+
+    LoginResponse:
+      type: object
+      additionalProperties: false
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          minLength: 1
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          description: Access-token lifetime in seconds.
+          minimum: 1
+
+    SaleState:
+      type: string
+      enum: [draft, active, ended]
+
+    SaleItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sale_id
+        - product_id
+        - name
+        - price
+        - total_quantity
+        - reserved_quantity
+        - sold_quantity
+        - available_quantity
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        sale_id:
+          $ref: '#/components/schemas/UUID'
+        product_id:
+          $ref: '#/components/schemas/UUID'
+        name:
+          type: string
+        price:
+          $ref: '#/components/schemas/Money'
+        total_quantity:
+          type: integer
+          minimum: 1
+        reserved_quantity:
+          type: integer
+          minimum: 0
+        sold_quantity:
+          type: integer
+          minimum: 0
+        available_quantity:
+          type: integer
+          minimum: 0
+
+    Sale:
+      type: object
+      additionalProperties: false
+      required: [id, state, starts_at, ends_at, created_at, items]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        state:
+          $ref: '#/components/schemas/SaleState'
+        starts_at:
+          $ref: '#/components/schemas/DateTime'
+        ends_at:
+          $ref: '#/components/schemas/DateTime'
+        created_at:
+          $ref: '#/components/schemas/DateTime'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaleItem'
+
+    SalePage:
+      type: object
+      additionalProperties: false
+      required: [sales, limit, offset]
+      properties:
+        sales:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sale'
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
+
+    ReserveRequest:
+      type: object
+      additionalProperties: false
+      required: [sale_item_id, quantity]
+      properties:
+        sale_item_id:
+          $ref: '#/components/schemas/UUID'
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+
+    ReservationState:
+      type: string
+      enum: [pending, paid, cancelled, expired]
+
+    Reservation:
+      type: object
+      additionalProperties: false
+      required: [id, user_id, sale_item_id, quantity, state, created_at, expires_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        user_id:
+          $ref: '#/components/schemas/UUID'
+        sale_item_id:
+          $ref: '#/components/schemas/UUID'
+        quantity:
+          type: integer
+          minimum: 1
+        state:
+          $ref: '#/components/schemas/ReservationState'
+        created_at:
+          $ref: '#/components/schemas/DateTime'
+        expires_at:
+          $ref: '#/components/schemas/DateTime'
+
+    Order:
+      type: object
+      additionalProperties: false
+      required: [id, reservation_id, user_id, sale_item_id, quantity, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+        reservation_id:
+          $ref: '#/components/schemas/UUID'
+        user_id:
+          $ref: '#/components/schemas/UUID'
+        sale_item_id:
+          $ref: '#/components/schemas/UUID'
+        quantity:
+          type: integer
+          minimum: 1
+        created_at:
+          $ref: '#/components/schemas/DateTime'
+
+    CreateSaleRequest:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at]
+      properties:
+        starts_at:
+          $ref: '#/components/schemas/DateTime'
+        ends_at:
+          $ref: '#/components/schemas/DateTime'
+
+    AddSaleItemRequest:
+      type: object
+      additionalProperties: false
+      required: [product_id, name, price, total_quantity]
+      properties:
+        product_id:
+          $ref: '#/components/schemas/UUID'
+        name:
+          type: string
+        price:
+          $ref: '#/components/schemas/Money'
+        total_quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+
+    ErrorCode:
+      type: string
+      enum:
+        - bad_request
+        - unauthorized
+        - forbidden
+        - not_found
+        - method_not_allowed
+        - conflict
+        - rate_limit_exceeded
+        - internal_error
+        - deadline_exceeded
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          minLength: 1
+        request_id:
+          type: string
+          minLength: 1
+
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
