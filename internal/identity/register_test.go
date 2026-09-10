@@ -16,7 +16,7 @@ type recordingUserRepository struct {
 	calls        int
 	contextMark  string
 	user         User
-	passwordHash string
+	passwordHash PasswordHash
 	err          error
 }
 
@@ -25,7 +25,7 @@ type registerContextKey struct{}
 func (r *recordingUserRepository) CreateUser(
 	ctx context.Context,
 	user User,
-	passwordHash string,
+	passwordHash PasswordHash,
 ) error {
 	r.calls++
 	if mark, ok := ctx.Value(registerContextKey{}).(string); ok {
@@ -43,10 +43,10 @@ func TestService_Register_NormalizesEmailAndUsesServerValues(t *testing.T) {
 
 	wantID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 	wantTime := time.Date(2026, time.September, 9, 18, 30, 0, 0, time.FixedZone("test", 3*60*60))
-	wantHash := "$argon2id$test-hash"
+	wantHash := PasswordHash{encoded: "$argon2id$test-hash"}
 	service.newID = func() uuid.UUID { return wantID }
 	service.now = func() time.Time { return wantTime }
-	service.hashPassword = func(password string) (string, error) {
+	service.hashPassword = func(password string) (PasswordHash, error) {
 		if password != registerTestPassword {
 			t.Fatalf("hashPassword() password = %q, want original password", password)
 		}
@@ -80,28 +80,12 @@ func TestService_Register_NormalizesEmailAndUsesServerValues(t *testing.T) {
 	assertRegisteredUser(t, repository.user, wantID, wantEmail, RoleUser, wantCreatedAt)
 }
 
-func TestNormalizeEmail_DisplayNamesResolveToSameMailbox(t *testing.T) {
-	const wantEmail = "user@example.com"
-
-	for _, input := range []string{
-		"Alice <USER@Example.COM>",
-		"Bob <user@example.com>",
-	} {
-		got, err := normalizeEmail(input)
-		if err != nil {
-			t.Fatalf("normalizeEmail(%q) error = %v", input, err)
-		}
-		if got != wantEmail {
-			t.Errorf("normalizeEmail(%q) = %q, want %q", input, got, wantEmail)
-		}
-	}
-}
-
 func TestService_Register_InvalidEmailDoesNotCallDependencies(t *testing.T) {
 	tests := map[string]string{
-		"empty":       "",
-		"spaces only": "   ",
-		"malformed":   "not-an-email",
+		"empty":        "",
+		"spaces only":  "   ",
+		"malformed":    "not-an-email",
+		"display name": "Alice <USER@Example.COM>",
 	}
 
 	for name, email := range tests {
@@ -109,9 +93,9 @@ func TestService_Register_InvalidEmailDoesNotCallDependencies(t *testing.T) {
 			repository := &recordingUserRepository{}
 			service := NewService(repository)
 			hashCalls := 0
-			service.hashPassword = func(string) (string, error) {
+			service.hashPassword = func(string) (PasswordHash, error) {
 				hashCalls++
-				return "hash", nil
+				return PasswordHash{encoded: "hash"}, nil
 			}
 
 			_, err := service.Register(context.Background(), RegisterInput{
@@ -161,7 +145,9 @@ func TestService_Register_PreservesRepositoryErrorIdentity(t *testing.T) {
 	wantErr := errors.New("repository failure")
 	repository := &recordingUserRepository{err: wantErr}
 	service := NewService(repository)
-	service.hashPassword = func(string) (string, error) { return "hash", nil }
+	service.hashPassword = func(string) (PasswordHash, error) {
+		return PasswordHash{encoded: "hash"}, nil
+	}
 
 	got, err := service.Register(context.Background(), RegisterInput{
 		Email:    "user@example.com",
@@ -179,7 +165,7 @@ func TestService_Register_PreservesHashErrorIdentity(t *testing.T) {
 	wantErr := errors.New("hash failure")
 	repository := &recordingUserRepository{}
 	service := NewService(repository)
-	service.hashPassword = func(string) (string, error) { return "", wantErr }
+	service.hashPassword = func(string) (PasswordHash, error) { return PasswordHash{}, wantErr }
 
 	_, err := service.Register(context.Background(), RegisterInput{
 		Email:    "user@example.com",

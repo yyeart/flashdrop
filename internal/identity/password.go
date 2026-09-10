@@ -12,6 +12,18 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+type PasswordHash struct {
+	encoded string
+}
+
+func (h *PasswordHash) Encoded() (string, error) {
+	if h.encoded == "" {
+		return "", errUnsupportedHash
+	}
+
+	return h.encoded, nil
+}
+
 const (
 	argonMemory      uint32 = 19 * 1024 // KiB
 	argonIterations  uint32 = 2
@@ -26,14 +38,14 @@ var (
 	errUnsupportedHash       = errors.New("unsupported password hash")
 )
 
-func hashPassword(password string) (string, error) {
+func hashPassword(password string) (PasswordHash, error) {
 	if err := validatePassword(password); err != nil {
-		return "", err
+		return PasswordHash{}, err
 	}
 
 	salt := make([]byte, saltLength)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return "", fmt.Errorf("generate password salt: %w", err)
+		return PasswordHash{}, fmt.Errorf("generate password salt: %w", err)
 	}
 
 	hash := argon2.IDKey(
@@ -47,7 +59,7 @@ func hashPassword(password string) (string, error) {
 
 	encoding := base64.RawStdEncoding
 
-	return fmt.Sprintf(
+	return PasswordHash{encoded: fmt.Sprintf(
 		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version,
 		argonMemory,
@@ -55,7 +67,7 @@ func hashPassword(password string) (string, error) {
 		argonParallelism,
 		encoding.EncodeToString(salt),
 		encoding.EncodeToString(hash),
-	), nil
+	)}, nil
 }
 
 func verifyPassword(password, encoded string) (bool, error) {

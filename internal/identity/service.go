@@ -10,7 +10,7 @@ type Service struct {
 	users        userRepository
 	newID        func() uuid.UUID
 	now          func() time.Time
-	hashPassword func(string) (string, error)
+	hashPassword func(string) (PasswordHash, error)
 }
 
 func NewService(users userRepository) *Service {

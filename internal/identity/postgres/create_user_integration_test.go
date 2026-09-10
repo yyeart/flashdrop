@@ -20,19 +20,20 @@ import (
 const (
 	postgresOperationTimeout = 5 * time.Second
 	integrationPassword      = "correct horse battery staple"
-	integrationPasswordHash  = "$argon2id$integration-test-hash"
 )
 
 type capturedUserRepository struct {
-	user identity.User
+	user         identity.User
+	passwordHash identity.PasswordHash
 }
 
 func (r *capturedUserRepository) CreateUser(
 	_ context.Context,
 	user identity.User,
-	_ string,
+	passwordHash identity.PasswordHash,
 ) error {
 	r.user = user
+	r.passwordHash = passwordHash
 	return nil
 }
 
@@ -109,13 +110,14 @@ func TestStore_CreateUser_DuplicateEmailRollsBackUser(t *testing.T) {
 	email := uniqueEmail("duplicate")
 	first := newTestUser(t, email)
 	second := newTestUser(t, email)
+	passwordHash := newTestPasswordHash(t)
 	cleanupUsers(t, pool, first.ID(), second.ID())
 
-	if err := store.CreateUser(ctx, first, integrationPasswordHash); err != nil {
+	if err := store.CreateUser(ctx, first, passwordHash); err != nil {
 		t.Fatalf("CreateUser(first) error = %v", err)
 	}
 
-	err := store.CreateUser(ctx, second, integrationPasswordHash)
+	err := store.CreateUser(ctx, second, passwordHash)
 	if !errors.Is(err, identity.ErrEmailAlreadyExists) {
 		t.Fatalf("CreateUser(second) error = %v, want ErrEmailAlreadyExists", err)
 	}
@@ -133,38 +135,22 @@ func TestStore_CreateUser_DuplicateEmailRollsBackUser(t *testing.T) {
 	}
 }
 
-func TestRegister_DisplayNamesForSameMailboxConflict(t *testing.T) {
+func TestRegister_RejectsDisplayName(t *testing.T) {
 	pool := openTestPool(t)
 	service := identity.NewService(identity_postgres.NewStore(pool))
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
 	mailbox := uniqueEmail("display-name")
-	first, err := service.Register(ctx, identity.RegisterInput{
+	_, err := service.Register(ctx, identity.RegisterInput{
 		Email:    "Alice <" + strings.ToUpper(mailbox) + ">",
 		Password: integrationPassword,
 	})
-	if err != nil {
-		t.Fatalf("Register(first display name) error = %v", err)
+	if !errors.Is(err, identity.ErrInvalidEmail) {
+		t.Fatalf("Register(display name) error = %v, want ErrInvalidEmail", err)
 	}
-	cleanupUsers(t, pool, first.ID())
-
-	if first.Email() != mailbox {
-		t.Fatalf("Register(first display name) email = %q, want %q", first.Email(), mailbox)
-	}
-
-	_, err = service.Register(ctx, identity.RegisterInput{
-		Email:    "Bob <" + mailbox + ">",
-		Password: integrationPassword,
-	})
-	if !errors.Is(err, identity.ErrEmailAlreadyExists) {
-		t.Fatalf(
-			"Register(second display name) error = %v, want ErrEmailAlreadyExists",
-			err,
-		)
-	}
-	if got := countCredentialsByEmail(t, pool, mailbox); got != 1 {
-		t.Fatalf("credentials with email %q = %d, want 1", mailbox, got)
+	if got := countCredentialsByEmail(t, pool, mailbox); got != 0 {
+		t.Fatalf("credentials with email %q = %d, want 0", mailbox, got)
 	}
 }
 
@@ -177,6 +163,7 @@ func TestStore_CreateUser_ConcurrentDuplicateEmailHasOneWinner(t *testing.T) {
 		newTestUser(t, email),
 		newTestUser(t, email),
 	}
+	passwordHash := newTestPasswordHash(t)
 	cleanupUsers(t, pool, users[0].ID(), users[1].ID())
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
@@ -187,7 +174,7 @@ func TestStore_CreateUser_ConcurrentDuplicateEmailHasOneWinner(t *testing.T) {
 		waitGroup.Add(1)
 		go func(candidate identity.User) {
 			defer waitGroup.Done()
-			results <- store.CreateUser(ctx, candidate, integrationPasswordHash)
+			results <- store.CreateUser(ctx, candidate, passwordHash)
 		}(user)
 	}
 	waitGroup.Wait()
@@ -220,17 +207,36 @@ func TestStore_CreateUser_CanceledContextDoesNotPersist(t *testing.T) {
 	pool := openTestPool(t)
 	store := identity_postgres.NewStore(pool)
 	user := newTestUser(t, uniqueEmail("cancelled"))
+	passwordHash := newTestPasswordHash(t)
 	cleanupUsers(t, pool, user.ID())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := store.CreateUser(ctx, user, integrationPasswordHash)
+	err := store.CreateUser(ctx, user, passwordHash)
 	if err == nil {
 		t.Fatal("CreateUser() error = nil with canceled context")
 	}
 	if userExists(t, pool, user.ID()) {
 		t.Fatalf("user %s persisted with canceled context", user.ID())
+	}
+}
+
+func TestStore_CreateUser_RejectsEmptyPasswordHashWithoutPersisting(t *testing.T) {
+	pool := openTestPool(t)
+	store := identity_postgres.NewStore(pool)
+	user := newTestUser(t, uniqueEmail("empty-password-hash"))
+	cleanupUsers(t, pool, user.ID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	err := store.CreateUser(ctx, user, identity.PasswordHash{})
+	if err == nil {
+		t.Fatal("CreateUser() error = nil with empty PasswordHash")
+	}
+	if userExists(t, pool, user.ID()) {
+		t.Fatalf("user %s persisted with empty PasswordHash", user.ID())
 	}
 }
 
@@ -248,6 +254,22 @@ func newTestUser(t *testing.T, email string) identity.User {
 	}
 
 	return user
+}
+
+func newTestPasswordHash(t *testing.T) identity.PasswordHash {
+	t.Helper()
+
+	repository := &capturedUserRepository{}
+	service := identity.NewService(repository)
+	_, err := service.Register(context.Background(), identity.RegisterInput{
+		Email:    uniqueEmail("password-hash"),
+		Password: integrationPassword,
+	})
+	if err != nil {
+		t.Fatalf("create test PasswordHash: %v", err)
+	}
+
+	return repository.passwordHash
 }
 
 func uniqueEmail(prefix string) string {

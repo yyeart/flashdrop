@@ -14,10 +14,11 @@ import (
 const testPassword = "correct horse battery staple"
 
 func TestHashPasswordVerify(t *testing.T) {
-	encoded, err := hashPassword(testPassword)
+	passwordHash, err := hashPassword(testPassword)
 	if err != nil {
 		t.Fatalf("hashPassword() error = %v", err)
 	}
+	encoded := mustEncodePasswordHash(t, passwordHash)
 
 	matched, err := verifyPassword(testPassword, encoded)
 	if err != nil {
@@ -37,14 +38,16 @@ func TestHashPasswordVerify(t *testing.T) {
 }
 
 func TestHashPasswordUsesRandomSalt(t *testing.T) {
-	first, err := hashPassword(testPassword)
+	firstHash, err := hashPassword(testPassword)
 	if err != nil {
 		t.Fatalf("hashPassword(first) error = %v", err)
 	}
-	second, err := hashPassword(testPassword)
+	secondHash, err := hashPassword(testPassword)
 	if err != nil {
 		t.Fatalf("HashPassword(second) error = %v", err)
 	}
+	first := mustEncodePasswordHash(t, firstHash)
+	second := mustEncodePasswordHash(t, secondHash)
 
 	if first == second {
 		t.Fatal("two password hashes are equal, want different salts")
@@ -64,10 +67,11 @@ func TestHashPasswordUsesRandomSalt(t *testing.T) {
 }
 
 func TestHashPasswordEncodesExpectedPHCParametersAndLengths(t *testing.T) {
-	encoded, err := hashPassword(testPassword)
+	passwordHash, err := hashPassword(testPassword)
 	if err != nil {
 		t.Fatalf("hashPassword() error = %v", err)
 	}
+	encoded := mustEncodePasswordHash(t, passwordHash)
 
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 {
@@ -101,10 +105,11 @@ func TestHashPasswordEncodesExpectedPHCParametersAndLengths(t *testing.T) {
 }
 
 func TestVerifyPasswordRejectsUnsupportedPHC(t *testing.T) {
-	encoded, err := hashPassword(testPassword)
+	passwordHash, err := hashPassword(testPassword)
 	if err != nil {
 		t.Fatalf("hashPassword() error = %v", err)
 	}
+	encoded := mustEncodePasswordHash(t, passwordHash)
 
 	tests := map[string]string{
 		"algorithm": strings.Replace(encoded, "$argon2id$", "$argon2i$", 1),
@@ -134,6 +139,14 @@ func TestVerifyPasswordRejectsUnsupportedPHC(t *testing.T) {
 				t.Fatal("verifyPassword() = true for unsupported PHC")
 			}
 		})
+	}
+}
+
+func TestPasswordHashEncodedRejectsZeroValue(t *testing.T) {
+	var passwordHash PasswordHash
+	_, err := passwordHash.Encoded()
+	if !errors.Is(err, errUnsupportedHash) {
+		t.Fatalf("PasswordHash{}.Encoded() error = %v, want errUnsupportedHash", err)
 	}
 }
 
@@ -233,4 +246,15 @@ func testPHCString(saltLen, hashLen int) string {
 		encoding.EncodeToString(make([]byte, saltLen)),
 		encoding.EncodeToString(make([]byte, hashLen)),
 	)
+}
+
+func mustEncodePasswordHash(t *testing.T, passwordHash PasswordHash) string {
+	t.Helper()
+
+	encoded, err := passwordHash.Encoded()
+	if err != nil {
+		t.Fatalf("PasswordHash.Encoded() error = %v", err)
+	}
+
+	return encoded
 }

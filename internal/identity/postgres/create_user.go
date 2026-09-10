@@ -12,8 +12,13 @@ import (
 func (s *Store) CreateUser(
 	ctx context.Context,
 	user identity.User,
-	passwordHash string,
+	passwordHash identity.PasswordHash,
 ) error {
+	hash, err := passwordHash.Encoded()
+	if err != nil {
+		return err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -45,7 +50,7 @@ func (s *Store) CreateUser(
 
 	if _, err := tx.Exec(
 		ctx, insertUserCredentialsQuery,
-		user.ID(), user.Email(), passwordHash,
+		user.ID(), user.Email(), hash,
 	); err != nil {
 		return mapRegistrationError(err)
 	}

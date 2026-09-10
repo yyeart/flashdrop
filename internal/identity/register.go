@@ -16,7 +16,7 @@ type userRepository interface {
 	CreateUser(
 		ctx context.Context,
 		user User,
-		passwordHash string,
+		passwordHash PasswordHash,
 	) error
 }
 
@@ -56,5 +56,9 @@ func normalizeEmail(email string) (string, error) {
 		return "", ErrInvalidEmail
 	}
 
-	return parsed.Address, nil
+	if parsed.Address != normalized || parsed.Name != "" {
+		return "", ErrInvalidEmail
+	}
+
+	return normalized, nil
 }
