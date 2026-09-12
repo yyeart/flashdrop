@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"strings"
 	"testing"
@@ -37,9 +38,38 @@ func (r *recordingUserRepository) CreateUser(
 	return r.err
 }
 
+func (r *recordingUserRepository) FindLoginCreds(
+	context.Context,
+	string,
+) (LoginCredentials, bool, error) {
+	return LoginCredentials{}, false, nil
+}
+
+func newRegisterTestService(t *testing.T, repository userRepository) *Service {
+	t.Helper()
+
+	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		t.Fatal("ed25519 private key returned a non-ed25519 public key")
+	}
+	service, err := NewService(repository, TokenConfig{
+		Issuer:     "flashdrop",
+		Audience:   "flashdrop-api",
+		TTL:        15 * time.Minute,
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	return service
+}
+
 func TestService_Register_NormalizesEmailAndUsesServerValues(t *testing.T) {
 	repository := &recordingUserRepository{}
-	service := NewService(repository)
+	service := newRegisterTestService(t, repository)
 
 	wantID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 	wantTime := time.Date(2026, time.September, 9, 18, 30, 0, 0, time.FixedZone("test", 3*60*60))
@@ -91,7 +121,7 @@ func TestService_Register_InvalidEmailDoesNotCallDependencies(t *testing.T) {
 	for name, email := range tests {
 		t.Run(name, func(t *testing.T) {
 			repository := &recordingUserRepository{}
-			service := NewService(repository)
+			service := newRegisterTestService(t, repository)
 			hashCalls := 0
 			service.hashPassword = func(string) (PasswordHash, error) {
 				hashCalls++
@@ -125,7 +155,7 @@ func TestService_Register_RejectsPasswordOutsideByteLimits(t *testing.T) {
 	for name, password := range tests {
 		t.Run(name, func(t *testing.T) {
 			repository := &recordingUserRepository{}
-			service := NewService(repository)
+			service := newRegisterTestService(t, repository)
 
 			_, err := service.Register(context.Background(), RegisterInput{
 				Email:    "user@example.com",
@@ -144,7 +174,7 @@ func TestService_Register_RejectsPasswordOutsideByteLimits(t *testing.T) {
 func TestService_Register_PreservesRepositoryErrorIdentity(t *testing.T) {
 	wantErr := errors.New("repository failure")
 	repository := &recordingUserRepository{err: wantErr}
-	service := NewService(repository)
+	service := newRegisterTestService(t, repository)
 	service.hashPassword = func(string) (PasswordHash, error) {
 		return PasswordHash{encoded: "hash"}, nil
 	}
@@ -164,7 +194,7 @@ func TestService_Register_PreservesRepositoryErrorIdentity(t *testing.T) {
 func TestService_Register_PreservesHashErrorIdentity(t *testing.T) {
 	wantErr := errors.New("hash failure")
 	repository := &recordingUserRepository{}
-	service := NewService(repository)
+	service := newRegisterTestService(t, repository)
 	service.hashPassword = func(string) (PasswordHash, error) { return PasswordHash{}, wantErr }
 
 	_, err := service.Register(context.Background(), RegisterInput{

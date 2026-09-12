@@ -2,6 +2,7 @@ package identity_postgres_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
@@ -37,10 +38,36 @@ func (r *capturedUserRepository) CreateUser(
 	return nil
 }
 
+func (r *capturedUserRepository) FindLoginCreds(
+	context.Context,
+	string,
+) (identity.LoginCredentials, bool, error) {
+	return identity.LoginCredentials{}, false, nil
+}
+
+func testTokenConfig() identity.TokenConfig {
+	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		panic("ed25519 private key returned a non-ed25519 public key")
+	}
+
+	return identity.TokenConfig{
+		Issuer:     "flashdrop",
+		Audience:   "flashdrop-api",
+		TTL:        15 * time.Minute,
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	}
+}
+
 func TestRegister_PersistsNormalizedUserAndPasswordHash(t *testing.T) {
 	pool := openTestPool(t)
 	store := identity_postgres.NewStore(pool)
-	service := identity.NewService(store)
+	service, err := identity.NewService(store, testTokenConfig())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
@@ -137,12 +164,15 @@ func TestStore_CreateUser_DuplicateEmailRollsBackUser(t *testing.T) {
 
 func TestRegister_RejectsDisplayName(t *testing.T) {
 	pool := openTestPool(t)
-	service := identity.NewService(identity_postgres.NewStore(pool))
+	service, err := identity.NewService(identity_postgres.NewStore(pool), testTokenConfig())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
 	mailbox := uniqueEmail("display-name")
-	_, err := service.Register(ctx, identity.RegisterInput{
+	_, err = service.Register(ctx, identity.RegisterInput{
 		Email:    "Alice <" + strings.ToUpper(mailbox) + ">",
 		Password: integrationPassword,
 	})
@@ -244,7 +274,10 @@ func newTestUser(t *testing.T, email string) identity.User {
 	t.Helper()
 
 	repository := &capturedUserRepository{}
-	service := identity.NewService(repository)
+	service, err := identity.NewService(repository, testTokenConfig())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
 	user, err := service.Register(context.Background(), identity.RegisterInput{
 		Email:    email,
 		Password: integrationPassword,
@@ -260,8 +293,11 @@ func newTestPasswordHash(t *testing.T) identity.PasswordHash {
 	t.Helper()
 
 	repository := &capturedUserRepository{}
-	service := identity.NewService(repository)
-	_, err := service.Register(context.Background(), identity.RegisterInput{
+	service, err := identity.NewService(repository, testTokenConfig())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	_, err = service.Register(context.Background(), identity.RegisterInput{
 		Email:    uniqueEmail("password-hash"),
 		Password: integrationPassword,
 	})

@@ -12,14 +12,6 @@ type RegisterInput struct {
 	Password string
 }
 
-type userRepository interface {
-	CreateUser(
-		ctx context.Context,
-		user User,
-		passwordHash PasswordHash,
-	) error
-}
-
 func (s *Service) Register(
 	ctx context.Context,
 	input RegisterInput,

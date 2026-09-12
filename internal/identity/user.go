@@ -35,3 +35,7 @@ func (u *User) Role() Role {
 func (u *User) CreatedAt() time.Time {
 	return u.createdAt
 }
+
+func (r Role) IsUserOrAdmin() bool {
+	return r == RoleUser || r == RoleAdmin
+}

@@ -97,6 +97,14 @@ func validatePassword(password string) error {
 	return nil
 }
 
+func ParsePasswordHash(encoded string) (PasswordHash, error) {
+	if _, _, err := parsePasswordHash(encoded); err != nil {
+		return PasswordHash{}, err
+	}
+
+	return PasswordHash{encoded: encoded}, nil
+}
+
 func parsePasswordHash(encoded string) ([]byte, []byte, error) {
 	if len(encoded) > 256 {
 		return nil, nil, errMalformedPasswordHash
