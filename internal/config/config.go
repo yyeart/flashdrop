@@ -12,6 +12,7 @@ import (
 type Config struct {
 	LogLevel        slog.Level
 	ShutdownTimeout time.Duration
+	DatabaseURL     string
 }
 
 func Load() (Config, error) {
@@ -59,8 +60,14 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, errors.New("SHUTDOWN_TIMEOUT duration must be > 0")
 	}
 
+	databaseURL, exists := lookup("DATABASE_URL")
+	if !exists {
+		databaseURL = ""
+	}
+
 	return Config{
 		LogLevel:        level,
 		ShutdownTimeout: timeout,
+		DatabaseURL:     databaseURL,
 	}, nil
 }

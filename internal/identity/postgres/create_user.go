@@ -36,7 +36,7 @@ func (s *Store) CreateUser(
 
 	if _, err := tx.Exec(
 		ctx, insertUserQuery,
-		user.ID(), identity.RoleUser, user.CreatedAt(),
+		user.ID(), user.Role(), user.CreatedAt(),
 	); err != nil {
 		return fmt.Errorf("insert user: %w", err)
 	}

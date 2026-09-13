@@ -21,6 +21,28 @@ func TestLoad_ValidConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "database URL",
+			env: map[string]string{
+				"DATABASE_URL": "postgres://test:test@localhost:5432/flashdrop?sslmode=disable",
+			},
+			want: Config{
+				LogLevel:        slog.LevelInfo,
+				ShutdownTimeout: 10 * time.Second,
+				DatabaseURL:     "postgres://test:test@localhost:5432/flashdrop?sslmode=disable",
+			},
+		},
+		{
+			name: "empty database URL remains optional",
+			env: map[string]string{
+				"DATABASE_URL": "",
+			},
+			want: Config{
+				LogLevel:        slog.LevelInfo,
+				ShutdownTimeout: 10 * time.Second,
+				DatabaseURL:     "",
+			},
+		},
+		{
 			name: "debug",
 			env: map[string]string{
 				"LOG_LEVEL":        "DEBUG",
