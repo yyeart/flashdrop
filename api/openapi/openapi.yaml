@@ -632,9 +632,15 @@ components:
 
     Money:
       type: string
-      description: Positive decimal amount with exactly two fractional digits.
+      description: Canonical response representation of a positive decimal amount with exactly two fractional digits.
       pattern: '^(?:0\.(?:0[1-9]|[1-9][0-9])|[1-9][0-9]*\.[0-9]{2})$'
-      examples: ['12.50']
+      examples: ['12.50', '0.01']
+
+    MoneyInput:
+      type: string
+      description: Unsigned decimal input with an optional fractional part of one or two digits.
+      pattern: '^[0-9]+(?:\.[0-9]{1,2})?$'
+      examples: ['12', '12.5', '12.50', '0.01']
 
     Role:
       type: string
@@ -857,7 +863,7 @@ components:
         name:
           type: string
         price:
-          $ref: '#/components/schemas/Money'
+          $ref: '#/components/schemas/MoneyInput'
         total_quantity:
           type: integer
           minimum: 1
