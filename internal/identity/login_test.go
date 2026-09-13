@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,70 @@ func TestService_Login_InvalidCredentialsHaveCommonContract(t *testing.T) {
 			}
 			if result != (LoginResult{}) {
 				t.Fatalf("Login() result = %#v, want zero value", result)
+			}
+		})
+	}
+}
+
+func TestService_Login_RejectsPasswordOutsideByteLimits(t *testing.T) {
+	tests := map[string]string{
+		"seven ASCII bytes": strings.Repeat("a", 7),
+		"129 ASCII bytes":   strings.Repeat("a", 129),
+		"130 UTF-8 bytes":   strings.Repeat("я", 65),
+	}
+
+	for name, password := range tests {
+		t.Run(name, func(t *testing.T) {
+			repository := &loginTestRepository{}
+			service := newLoginTestService(t, repository)
+
+			result, err := service.Login(context.Background(), LoginInput{
+				Email:    "user@example.com",
+				Password: password,
+			})
+			if !errors.Is(err, ErrInvalidPasswordLength) {
+				t.Fatalf("Login() error = %v, want ErrInvalidPasswordLength", err)
+			}
+			if result != (LoginResult{}) {
+				t.Fatalf("Login() result = %#v, want zero value", result)
+			}
+			if repository.findCalls != 0 {
+				t.Fatalf("FindLoginCreds() calls = %d, want 0", repository.findCalls)
+			}
+		})
+	}
+}
+
+func TestService_Login_AcceptsPasswordByteLengthBoundaries(t *testing.T) {
+	tests := map[string]string{
+		"eight bytes":                    strings.Repeat("a", 8),
+		"one hundred twenty-eight bytes": strings.Repeat("a", 128),
+	}
+
+	for name, password := range tests {
+		t.Run(name, func(t *testing.T) {
+			repository := &loginTestRepository{
+				found: true,
+				credentials: LoginCredentials{
+					UserID:       uuid.MustParse("00000000-0000-0000-0000-000000000123"),
+					Role:         RoleUser,
+					PasswordHash: mustLoginTestPasswordHash(t, password),
+				},
+			}
+			service := newLoginTestService(t, repository)
+
+			result, err := service.Login(context.Background(), LoginInput{
+				Email:    "user@example.com",
+				Password: password,
+			})
+			if err != nil {
+				t.Fatalf("Login() error = %v", err)
+			}
+			if result.AccessToken == "" {
+				t.Fatal("Login() access token is empty")
+			}
+			if repository.findCalls != 1 {
+				t.Fatalf("FindLoginCreds() calls = %d, want 1", repository.findCalls)
 			}
 		})
 	}

@@ -40,6 +40,12 @@ func (s *Service) Login(
 		)
 	}
 
+	if err := validatePassword(input.Password); err != nil {
+		return LoginResult{}, fmt.Errorf(
+			"validate password: %w", err,
+		)
+	}
+
 	credentials, found, err := s.users.FindLoginCreds(ctx, email)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf(
