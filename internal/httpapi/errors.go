@@ -47,6 +47,7 @@ var (
 	ErrNoAllowedRoles        = errors.New("allowed roles list must not be empty")
 	ErrInvalidAllowedRole    = errors.New("unknown allowed role")
 	ErrInvalidErrorCode      = errors.New("invalid error code")
+	ErrNilIdentityService    = errors.New("identity service must not be nil")
 )
 
 func (code errorCode) valid() bool {
