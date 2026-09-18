@@ -68,18 +68,7 @@ func (h *AuthHandler) Register(
 
 	var request registerRequest
 	if err := decodeJSON(w, r, &request); err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		writeErrorAndLog(
-			h.logger,
-			w,
-			r,
-			http.StatusBadRequest,
-			codeBadRequest,
-			"invalid request body",
-		)
+		handleBadRequest(w, r, h.logger, "invalid request body")
 
 		return
 	}
@@ -187,18 +176,7 @@ func (h *AuthHandler) Login(
 
 	var request loginRequest
 	if err := decodeJSON(w, r, &request); err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		writeErrorAndLog(
-			h.logger,
-			w,
-			r,
-			http.StatusBadRequest,
-			codeBadRequest,
-			"invalid request body",
-		)
+		handleBadRequest(w, r, h.logger, "invalid request body")
 
 		return
 	}
@@ -269,22 +247,4 @@ func (h *AuthHandler) handleLoginError(
 			"internal server error",
 		)
 	}
-}
-
-func logHandlerFailure(
-	logger *slog.Logger,
-	w http.ResponseWriter,
-	r *http.Request,
-	reason string,
-) {
-	requestID := requestIDForResponse(r.Context(), w)
-
-	logger.ErrorContext(
-		r.Context(),
-		"HTTP handler failed",
-		slog.String("reason", reason),
-		slog.String("request_id", requestID),
-		slog.String("method", r.Method),
-		slog.String("path", r.URL.Path),
-	)
 }

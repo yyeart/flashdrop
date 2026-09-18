@@ -48,6 +48,12 @@ var (
 	ErrInvalidAllowedRole    = errors.New("unknown allowed role")
 	ErrInvalidErrorCode      = errors.New("invalid error code")
 	ErrNilIdentityService    = errors.New("identity service must not be nil")
+	ErrNilPublicSaleService  = errors.New("public sale service must not be nil")
+	ErrInvalidPagination     = errors.New("invalid pagination parameters")
+	ErrNilAdminSaleService   = errors.New("admin sale service must not be nil")
+	ErrNilNewIDFunc          = errors.New("new id func must not be nil")
+	ErrNilNowFunc            = errors.New("now func must not be nil")
+	ErrInvalidSaleID         = errors.New("invalid sale id")
 )
 
 func (code errorCode) valid() bool {
