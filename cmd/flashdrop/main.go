@@ -5,16 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yyeart/flashdrop/internal/app"
 	"github.com/yyeart/flashdrop/internal/appLogger"
 	"github.com/yyeart/flashdrop/internal/config"
+	flashsale_postgres "github.com/yyeart/flashdrop/internal/flashsale/postgres"
+	"github.com/yyeart/flashdrop/internal/httpapi"
 	"github.com/yyeart/flashdrop/internal/identity"
 	identity_postgres "github.com/yyeart/flashdrop/internal/identity/postgres"
 )
@@ -51,13 +55,10 @@ func main() {
 	logger := appLogger.NewLogger(serverCfg.LogLevel, os.Stderr)
 	slog.SetDefault(logger)
 
-	if err := run(
+	if err := runServer(
 		ctx,
-		serverCfg.ShutdownTimeout,
-		func(ctx context.Context) error {
-			<-ctx.Done()
-			return nil
-		},
+		serverCfg,
+		logger,
 	); err != nil {
 		logger.Error("worker error", "err", err)
 
@@ -151,4 +152,101 @@ func loadSeedAdminInput(
 		Email:    email,
 		Password: password,
 	}, nil
+}
+
+func runServer(
+	ctx context.Context,
+	cfg config.ServerConfig,
+	logger *slog.Logger,
+) error {
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return err
+	}
+
+	flashsaleStore := flashsale_postgres.NewStore(pool)
+	identityStore := identity_postgres.NewStore(pool)
+
+	tokenConfig, err := identity.LoadTokenConfig(
+		cfg.JWTIssuer, cfg.JWTAudience,
+		cfg.JWTTTL, cfg.JWTPublicKeyFile, cfg.JWTPrivateKeyFile,
+	)
+	if err != nil {
+		return err
+	}
+
+	identityService, err := identity.NewService(identityStore, tokenConfig)
+	if err != nil {
+		return err
+	}
+
+	authHandler, err := httpapi.NewAuthHandler(identityService, logger)
+	if err != nil {
+		return err
+	}
+
+	publicSaleHandler, err := httpapi.NewPublicSaleHandler(flashsaleStore, logger)
+	if err != nil {
+		return err
+	}
+
+	adminSaleHandler, err := httpapi.NewAdminSaleHandler(
+		flashsaleStore, logger,
+		uuid.New, time.Now,
+	)
+	if err != nil {
+		return err
+	}
+
+	reservationHandler, err := httpapi.NewReservationHandler(
+		flashsaleStore, logger,
+		uuid.New, time.Now, cfg.ReservationTTL,
+	)
+	if err != nil {
+		return err
+	}
+
+	orderHandler, err := httpapi.NewOrderHandler(flashsaleStore, logger)
+	if err != nil {
+		return err
+	}
+
+	deps := httpapi.RouterDeps{
+		Auth:               authHandler,
+		PublicSales:        publicSaleHandler,
+		AdminSales:         adminSaleHandler,
+		Reservations:       reservationHandler,
+		Orders:             orderHandler,
+		Authenticator:      identityService,
+		RateLimiter:        httpapi.AllowAllRateLimiter{},
+		RequestIDGenerator: uuid.New,
+		Logger:             logger,
+		RequestTimeout:     cfg.HTTPRequestTimeout,
+	}
+	router, err := httpapi.NewRouter(deps)
+	if err != nil {
+		return err
+	}
+
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", cfg.HTTPAddr)
+	if err != nil {
+		return err
+	}
+
+	server, err := httpapi.NewServer(listener, router, cfg.HTTPShutdownTimeout)
+	if err != nil {
+		if closeErr := listener.Close(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+
+		return err
+	}
+
+	return run(ctx, cfg.ShutdownTimeout, server.Run)
 }
