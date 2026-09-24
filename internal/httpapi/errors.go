@@ -60,6 +60,7 @@ var (
 	ErrInvalidIdempotencyKey   = errors.New("invalid idempotency key")
 	ErrInvalidID               = errors.New("invalid id")
 	ErrNilHandler              = errors.New("handler must not be nil")
+	ErrNilListener             = errors.New("listener must not be nil")
 )
 
 func (code errorCode) valid() bool {
