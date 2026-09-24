@@ -29,46 +29,31 @@ func main() {
 
 	btLogger := appLogger.NewLogger(slog.LevelInfo, os.Stderr)
 
-	config, err := config.Load()
-	if err != nil {
-		btLogger.Error("failed to load config", "err", err)
-
-		os.Exit(1)
-	}
-
-	logger := appLogger.NewLogger(config.LogLevel, os.Stderr)
-	slog.SetDefault(logger)
-
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "seed-admin":
-			if len(os.Args) > 2 {
-				logger.Error("unexpected argument")
-				os.Exit(1)
-			}
-
-			input, err := loadSeedAdminInput(os.LookupEnv)
-			if err != nil {
-				logger.Error("invalid seed-admin configuration", "err", err)
-				os.Exit(1)
-			}
-
-			if err := runSeedAdmin(ctx, config, input); err != nil {
-				logger.Error("seed admin failed", "err", err)
-				os.Exit(1)
-			}
-
+			runSeedAdminCommand(ctx, btLogger)
 			return
 
 		default:
-			logger.Error("unknown command")
+			btLogger.Error("unknown command", "command", os.Args[1])
 			os.Exit(1)
 		}
 	}
 
+	serverCfg, err := config.LoadServer()
+	if err != nil {
+		btLogger.Error("failed to load server config", "error", err)
+
+		os.Exit(1)
+	}
+
+	logger := appLogger.NewLogger(serverCfg.LogLevel, os.Stderr)
+	slog.SetDefault(logger)
+
 	if err := run(
 		ctx,
-		config.ShutdownTimeout,
+		serverCfg.ShutdownTimeout,
 		func(ctx context.Context) error {
 			<-ctx.Done()
 			return nil
@@ -76,6 +61,33 @@ func main() {
 	); err != nil {
 		logger.Error("worker error", "err", err)
 
+		os.Exit(1)
+	}
+}
+
+func runSeedAdminCommand(ctx context.Context, btLogger *slog.Logger) {
+	cfg, err := config.Load()
+	if err != nil {
+		btLogger.Error("failed to load config", "err", err)
+		os.Exit(1)
+	}
+
+	logger := appLogger.NewLogger(cfg.LogLevel, os.Stderr)
+	slog.SetDefault(logger)
+
+	if len(os.Args) > 2 {
+		logger.Error("unexpected argument")
+		os.Exit(1)
+	}
+
+	input, err := loadSeedAdminInput(os.LookupEnv)
+	if err != nil {
+		logger.Error("invalid seed-admin configuration", "err", err)
+		os.Exit(1)
+	}
+
+	if err := runSeedAdmin(ctx, cfg, input); err != nil {
+		logger.Error("seed admin failed", "err", err)
 		os.Exit(1)
 	}
 }

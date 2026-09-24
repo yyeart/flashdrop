@@ -98,13 +98,14 @@ func TestMainCLIHelper(t *testing.T) {
 
 func TestMainCLI(t *testing.T) {
 	for _, tt := range []struct {
-		name                         string
-		args                         []string
-		email, password, wantMessage string
+		name                                      string
+		args                                      []string
+		email, password, databaseURL, wantMessage string
 	}{
 		{name: "missing email", args: []string{"seed-admin"}, password: "secret-value", wantMessage: "SEED_ADMIN_EMAIL is required"},
 		{name: "missing password", args: []string{"seed-admin"}, email: "admin@example.com", wantMessage: "SEED_ADMIN_PASSWORD is required"},
 		{name: "missing database URL", args: []string{"seed-admin"}, email: "admin@example.com", password: "secret-value", wantMessage: "DATABASE_URL is required"},
+		{name: "seed-admin does not require JWT keys", args: []string{"seed-admin"}, email: "admin@example.com", password: "secret-value", databaseURL: "postgres://localhost:invalid/flashdrop", wantMessage: "open database:"},
 		{name: "unknown command", args: []string{"seed-admn"}, wantMessage: "unknown command"},
 		{name: "unexpected argument", args: []string{"seed-admin", "unexpected"}, wantMessage: "unexpected argument"},
 	} {
@@ -114,7 +115,7 @@ func TestMainCLI(t *testing.T) {
 			args := append([]string{"-test.run=^TestMainCLIHelper$", "--"}, tt.args...)
 			cmd := exec.CommandContext(ctx, os.Args[0], args...) // #nosec G204 G702 -- runs this test binary with fixed test-case arguments, without a shell.
 			// Do not inherit developer credentials or PostgreSQL settings.
-			cmd.Env = []string{"FLASHDROP_CLI_TEST_HELPER=1", "LOG_LEVEL=info", "SHUTDOWN_TIMEOUT=1s", "SEED_ADMIN_EMAIL=" + tt.email, "SEED_ADMIN_PASSWORD=" + tt.password}
+			cmd.Env = []string{"FLASHDROP_CLI_TEST_HELPER=1", "LOG_LEVEL=info", "SHUTDOWN_TIMEOUT=1s", "DATABASE_URL=" + tt.databaseURL, "SEED_ADMIN_EMAIL=" + tt.email, "SEED_ADMIN_PASSWORD=" + tt.password}
 			output, err := cmd.CombinedOutput()
 			if ctx.Err() != nil {
 				t.Fatal("CLI did not exit; it may have entered the server lifecycle")
