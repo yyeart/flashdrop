@@ -15,6 +15,38 @@ FlashDrop — учебный backend на Go для конкурентного �
 - SSE — best-effort канал; актуальное состояние восстанавливается через GET.
 - MVP не содержит refresh/logout и Kafka; они относятся ко второму этапу.
 
+## Локальный запуск
+
+Нужны Go, Docker с Compose и OpenSSL. Команды ниже выполняются из корня репозитория.
+
+```sh
+cp .env.example .env
+make db-up
+make port-forward
+make migrate-up
+make jwt-keys
+make run
+```
+
+`.env` содержит настройки приложения и PostgreSQL; проверьте `DATABASE_URL` перед запуском. `make jwt-keys` создаёт пару Ed25519 в `.dev/keys/` и откажется перезаписывать существующую. Приватный ключ и `.env` не добавляйте в Git.
+
+После запуска проверьте публичный endpoint в другом терминале:
+
+```sh
+curl -i http://127.0.0.1:8080/v1/sales
+```
+
+Чтобы создать администратора, задайте `SEED_ADMIN_EMAIL` и `SEED_ADMIN_PASSWORD` в `.env`. Команда `go run` сама не загружает этот файл, поэтому перед вызовом экспортируйте его переменные:
+
+```sh
+set -a
+. ./.env
+set +a
+go run ./cmd/flashdrop seed-admin
+```
+
+Для проверки изменений используйте `make test`, `make test-integration` (при запущенной PostgreSQL) и `make lint`. Остановить контейнеры можно командой `docker compose down`.
+
 ## Навигация
 
 - [Доменный язык](CONTEXT.md)

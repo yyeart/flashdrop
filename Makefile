@@ -1,9 +1,10 @@
 -include .env
 export
 
-.PHONY: test test-integration lint lint-fix port-forward port-close db-up db-down db-clean migrate-create migrate-action migrate-up migrate-down
+.PHONY: test test-integration lint lint-fix port-forward port-close db-up db-down db-clean migrate-create migrate-action migrate-up migrate-down jwt-keys run
 
 test:
+	@sh scripts/generate-jwt-keys_test.sh
 	@go test ./... -cover
 
 test-integration: export FLASHDROP_TEST_DSN = postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@127.0.0.1:5432/$(POSTGRES_DB)?sslmode=disable&search_path=flashdrop,public
@@ -67,3 +68,9 @@ migrate-up:
 
 migrate-down:
 	@make migrate-action action=down steps=1
+
+jwt-keys:
+	@./scripts/generate-jwt-keys.sh
+
+run:
+	@go run ./cmd/flashdrop
