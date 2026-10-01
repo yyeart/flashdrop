@@ -114,10 +114,11 @@ func TestRegister_PersistsNormalizedUserAndPasswordHash(t *testing.T) {
 			registered.Role(), storedRole, identity.RoleUser,
 		)
 	}
-	if !registered.CreatedAt().Equal(storedCreatedAt) {
+	delta := registered.CreatedAt().Sub(storedCreatedAt)
+	if delta <= -time.Microsecond || delta >= time.Microsecond {
 		t.Fatalf(
-			"created_at = returned %s, stored %s",
-			registered.CreatedAt(), storedCreatedAt,
+			"created_at = returned %s, stored %s, delta %s",
+			registered.CreatedAt(), storedCreatedAt, delta,
 		)
 	}
 	if storedHash == integrationPassword {

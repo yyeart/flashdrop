@@ -1,6 +1,6 @@
 # FlashDrop
 
-FlashDrop — учебный backend на Go для конкурентного резервирования ограниченного Stock.
+FlashDrop — учебный backend на Go для конкурентного резервирования ограниченного Stock. Текущий срез — HTTP API с PostgreSQL, регистрацией, Ed25519 access JWT и разграничением ролей; контракт описан в [OpenAPI 3.1.2](api/openapi/openapi.yaml).
 
 Проект специально разбит на два этапа:
 
@@ -10,14 +10,14 @@ FlashDrop — учебный backend на Go для конкурентного �
 ## Ключевые решения
 
 - PostgreSQL — источник истины для Sale, Stock, Reservation и Order.
-- Redis используется для rate limit и кэша идемпотентности, но не хранит бизнес-корректность.
-- MVP — один бинарник с глубокими модулями `identity`, `flashsale` и `notifications`.
-- SSE — best-effort канал; актуальное состояние восстанавливается через GET.
+- Redis запланирован для rate limit и кэша идемпотентности; бизнес-корректность остаётся в PostgreSQL.
+- MVP остаётся одним бинарником с модулями `identity` и `flashsale`; `notifications` добавляется позже.
+- Будущий SSE-канал будет best-effort; актуальное состояние восстанавливается через GET.
 - MVP не содержит refresh/logout и Kafka; они относятся ко второму этапу.
 
 ## Локальный запуск
 
-Нужны Go, Docker с Compose и OpenSSL. Команды ниже выполняются из корня репозитория.
+Нужны Go 1.26.5, Docker с Compose и OpenSSL. Команды ниже выполняются из корня репозитория.
 
 ```sh
 cp .env.example .env
@@ -28,7 +28,9 @@ make jwt-keys
 make run
 ```
 
-`.env` содержит настройки приложения и PostgreSQL; проверьте `DATABASE_URL` перед запуском. `make jwt-keys` создаёт пару Ed25519 в `.dev/keys/` и откажется перезаписывать существующую. Приватный ключ и `.env` не добавляйте в Git.
+`make run` загружает `.env` через Makefile. Проверьте `DATABASE_URL` перед запуском. `make jwt-keys` создаёт пару Ed25519 в `.dev/keys/` и откажется перезаписывать существующую; `.env` и `.dev/keys/` исключены из Git.
+
+Для HTTP-сервера обязательны `DATABASE_URL`, `JWT_PRIVATE_KEY_FILE` и `JWT_PUBLIC_KEY_FILE`. Остальные основные настройки из `.env.example` имеют defaults: `HTTP_ADDR=127.0.0.1:8080`, `HTTP_REQUEST_TIMEOUT=5s`, `HTTP_SHUTDOWN_TIMEOUT=5s`, `SHUTDOWN_TIMEOUT=10s`, `RESERVATION_TTL=15m`, `JWT_TTL=15m`. Пустые `JWT_ISSUER` и `JWT_AUDIENCE` означают defaults `flashdrop` и `flashdrop-api`. `SHUTDOWN_TIMEOUT` должен быть больше `HTTP_SHUTDOWN_TIMEOUT`.
 
 После запуска проверьте публичный endpoint в другом терминале:
 
@@ -36,7 +38,9 @@ make run
 curl -i http://127.0.0.1:8080/v1/sales
 ```
 
-Чтобы создать администратора, задайте `SEED_ADMIN_EMAIL` и `SEED_ADMIN_PASSWORD` в `.env`. Команда `go run` сама не загружает этот файл, поэтому перед вызовом экспортируйте его переменные:
+Публичные маршруты: регистрация, login, список и чтение Sale. Создание Reservation, отмена, тестовая оплата и чтение Order требуют access JWT. Создание и управление Sale требуют роли `admin`. Передавайте токен как `Authorization: Bearer <access_token>`, а при резервировании — заголовок `Idempotency-Key`. Полный состав запросов и ответов находится в [OpenAPI](api/openapi/openapi.yaml).
+
+Чтобы создать администратора, задайте `SEED_ADMIN_EMAIL` и `SEED_ADMIN_PASSWORD` в `.env`. Обычная регистрация всегда создаёт роль `user`. Команда `go run` сама не загружает `.env`, поэтому перед вызовом экспортируйте его переменные:
 
 ```sh
 set -a
@@ -45,12 +49,13 @@ set +a
 go run ./cmd/flashdrop seed-admin
 ```
 
-Для проверки изменений используйте `make test`, `make test-integration` (при запущенной PostgreSQL) и `make lint`. Остановить контейнеры можно командой `docker compose down`.
+Для проверки изменений используйте `make test`, `go test -race ./...`, `make lint` и `make test-integration` (при запущенной PostgreSQL с применёнными миграциями). OpenAPI contract tests входят в обычный `go test ./...`; интеграционные тесты требуют `FLASHDROP_TEST_DSN`, который задаёт `make test-integration`. Остановить контейнеры можно командой `docker compose down`.
 
 ## Навигация
 
 - [Доменный язык](CONTEXT.md)
 - [Архитектура](docs/architecture.md)
 - [Roadmap и gates](docs/plan/roadmap.md)
+- [Итоги Milestone 3](docs/milestones/m3-summary.md)
 - [Архитектурные решения](docs/adr/)
 - [Правила issue tracker](docs/agents/issue-tracker.md)
