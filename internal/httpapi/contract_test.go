@@ -263,7 +263,7 @@ func TestContract_SuccessResponses(t *testing.T) {
 			}
 
 			recorder := httptest.NewRecorder()
-			fixture.handler(t).ServeHTTP(recorder, newContractRequest(t, test))
+			fixture.handler(t).ServeHTTP(withReadDeadline(recorder), newContractRequest(t, test))
 			assertContractResponse(t, input, recorder, test.wantStatus)
 		})
 	}
@@ -274,6 +274,112 @@ func TestContract_SuccessResponses(t *testing.T) {
 				t.Errorf("OpenAPI operation %s %s (%s) has no success case", method, path, operation.OperationID)
 			}
 		}
+	}
+}
+
+type contractQuantityRoute struct {
+	contractCase
+	bodyPrefix  string
+	serviceName string
+	quantity    func(*routerFixture) int
+}
+
+func TestContract_QuantityInputs(t *testing.T) {
+	_, contractRouter := loadContract(t)
+	inputs := []struct {
+		name         string
+		value        string
+		wantQuantity int
+	}{
+		{name: "decimal integer", value: "1.0", wantQuantity: 1},
+		{name: "exponent integer", value: "1e0", wantQuantity: 1},
+		{name: "maximum", value: "2147483647", wantQuantity: 2147483647},
+		{name: "fraction", value: "1.5"},
+		{name: "overflow", value: "2147483648"},
+		{name: "null", value: "null"},
+		{name: "string", value: `"1"`},
+	}
+	routes := []contractQuantityRoute{
+		{
+			contractCase: contractCase{
+				name: "reserve", operationID: "reserveSaleItem", method: http.MethodPost,
+				path: "/v1/reservations", token: "user-token",
+				setup: func(t *testing.T, f *routerFixture) {
+					f.reservationService.reserve = func(_ context.Context, cmd flashsale.ReserveCommand, now time.Time) (flashsale.ReserveResult, error) {
+						return reservationResultForCommand(t, cmd, now, false), nil
+					}
+				},
+			},
+			bodyPrefix:  `{"sale_item_id":"` + routerTestItemID + `","quantity":`,
+			serviceName: "reserve",
+			quantity:    func(f *routerFixture) int { return f.reservationService.gotCommand.Quantity },
+		},
+		{
+			contractCase: contractCase{
+				name: "AddItem", operationID: "addSaleItem", method: http.MethodPost,
+				path: "/v1/admin/sales/" + routerTestSaleID + "/items", token: "admin-token",
+				setup: func(_ *testing.T, f *routerFixture) {
+					f.adminSaleService.addItem = func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, flashsale.Money, int) error { return nil }
+				},
+			},
+			bodyPrefix:  `{"product_id":"66666666-6666-6666-6666-666666666666","name":"Keyboard","price":"12.50","total_quantity":`,
+			serviceName: "add item",
+			quantity:    func(f *routerFixture) int { return f.adminSaleService.gotTotalQty },
+		},
+	}
+
+	for _, route := range routes {
+		t.Run(route.name, func(t *testing.T) {
+			for _, test := range inputs {
+				t.Run(test.name, func(t *testing.T) {
+					runContractQuantityInput(t, contractRouter, route, test.value, test.wantQuantity)
+				})
+			}
+		})
+	}
+}
+
+func runContractQuantityInput(
+	t *testing.T,
+	contractRouter routers.Router,
+	route contractQuantityRoute,
+	value string,
+	wantQuantity int,
+) {
+	t.Helper()
+
+	requestCase := route.contractCase
+	requestCase.body = route.bodyPrefix + value + `}`
+	validRequest := wantQuantity > 0
+	wantStatus := http.StatusBadRequest
+	fixture := newRouterFixture(t)
+	if validRequest {
+		wantStatus = http.StatusCreated
+		route.setup(t, fixture)
+	}
+
+	input := contractInput(t, contractRouter, newContractRequest(t, requestCase))
+	if got := input.Route.Operation.OperationID; got != route.operationID {
+		t.Fatalf("operationId = %q, want %q", got, route.operationID)
+	}
+	err := openapi3filter.ValidateRequest(t.Context(), input)
+	if validRequest && err != nil {
+		t.Fatalf("request violates OpenAPI contract: %v", err)
+	}
+	if !validRequest && err == nil {
+		t.Fatal("OpenAPI accepted an invalid quantity")
+	}
+
+	recorder := httptest.NewRecorder()
+	fixture.handler(t).ServeHTTP(withReadDeadline(recorder), newContractRequest(t, requestCase))
+	assertContractResponse(t, input, recorder, wantStatus)
+	if !validRequest {
+		assertNoRouterServiceCalls(t, fixture)
+		return
+	}
+	assertOnlyRouterServiceCalled(t, fixture, route.serviceName)
+	if got := route.quantity(fixture); got != wantQuantity {
+		t.Errorf("service quantity = %d, want %d", got, wantQuantity)
 	}
 }
 
@@ -298,7 +404,7 @@ func TestContract_ReservationReplay(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	fixture.handler(t).ServeHTTP(recorder, newContractRequest(t, test))
+	fixture.handler(t).ServeHTTP(withReadDeadline(recorder), newContractRequest(t, test))
 	assertContractResponse(t, input, recorder, test.wantStatus)
 }
 
@@ -314,6 +420,37 @@ func TestContract_ErrorResponses(t *testing.T) {
 		{
 			contractCase: contractCase{name: "malformed JSON", operationID: "registerUser", method: http.MethodPost,
 				path: "/v1/auth/register", body: `{"email":`, wantStatus: http.StatusBadRequest},
+			wantCode: codeBadRequest,
+		},
+		{
+			contractCase: contractCase{name: "uppercase email field", operationID: "registerUser", method: http.MethodPost,
+				path: "/v1/auth/register", body: `{"EMAIL":"user@example.com","password":"password123"}`,
+				wantStatus: http.StatusBadRequest,
+				setup: func(t *testing.T, f *routerFixture) {
+					service := newIdentityServiceForAuthTest(t, &authRegisterRepository{})
+					f.authService.register = service.Register
+				}},
+			wantCode: codeBadRequest,
+		},
+		{
+			contractCase: contractCase{name: "email exceeds maximum length", operationID: "registerUser", method: http.MethodPost,
+				path: "/v1/auth/register", body: `{"email":"` + strings.Repeat("a", 250) + `@x.io","password":"password123"}`,
+				wantStatus: http.StatusBadRequest,
+				setup: func(t *testing.T, f *routerFixture) {
+					service := newIdentityServiceForAuthTest(t, &authRegisterRepository{})
+					f.authService.register = service.Register
+				}},
+			wantCode: codeBadRequest,
+		},
+		{
+			contractCase: contractCase{name: "email exceeds maximum length before trimming", operationID: "registerUser", method: http.MethodPost,
+				// 255 characters in the request; trimming would reduce the length to 254.
+				path: "/v1/auth/register", body: `{"email":" ` + strings.Repeat("a", 249) + `@x.io","password":"password123"}`,
+				wantStatus: http.StatusBadRequest,
+				setup: func(t *testing.T, f *routerFixture) {
+					service := newIdentityServiceForAuthTest(t, &authRegisterRepository{})
+					f.authService.register = service.Register
+				}},
 			wantCode: codeBadRequest,
 		},
 		{
@@ -384,7 +521,7 @@ func runContractErrorCase(t *testing.T, contractRouter routers.Router, test cont
 	}
 
 	recorder := httptest.NewRecorder()
-	fixture.handler(t).ServeHTTP(recorder, newContractRequest(t, test.contractCase))
+	fixture.handler(t).ServeHTTP(withReadDeadline(recorder), newContractRequest(t, test.contractCase))
 	assertContractResponse(t, input, recorder, test.wantStatus)
 
 	var envelope errorEnvelope

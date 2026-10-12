@@ -35,7 +35,7 @@ Gate: при Stock 100 и 1000 конкурентных reserve по одной 
 
 ## Milestone 3 — HTTP, JWT и middleware
 
-Состояние: выполнено (2026-10-02). Итоговая проверка: [m3-summary.md](../milestones/m3-summary.md).
+Состояние: выполнено (2026-10-12, после повторного ревью). Итоговая проверка: [m3-summary.md](../milestones/m3-summary.md).
 
 - Перед handlers создать api/openapi/openapi.yaml версии 3.1.2.
 - Реализовать ручные net/http handlers согласно контракту.

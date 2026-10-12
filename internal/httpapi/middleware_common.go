@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	requestIDHeader  = "X-Request-ID"
-	retryAfterHeader = "Retry-After"
+	requestIDHeader    = "X-Request-ID"
+	retryAfterHeader   = "Retry-After"
+	responseWriteGrace = time.Second
 )
 
 func NewRequestID(generator RequestIDGenerator) (Middleware, error) {
@@ -112,6 +113,41 @@ func NewTimeout(
 			timedRequest := r.WithContext(ctx)
 
 			state := ensureResponseState(w)
+
+			deadline, _ := ctx.Deadline()
+			controller := http.NewResponseController(state)
+
+			if err := controller.SetReadDeadline(deadline); err != nil {
+				logger.ErrorContext(
+					ctx, "Failed to set request read deadline",
+					slog.Any("err", err),
+				)
+
+				writeErrorAndLog(
+					logger, state, timedRequest,
+					http.StatusInternalServerError,
+					codeInternalError, "Internal server error",
+				)
+
+				return
+			}
+
+			writeDeadline := deadline.Add(responseWriteGrace)
+
+			if err := controller.SetWriteDeadline(writeDeadline); err != nil {
+				logger.ErrorContext(
+					ctx, "Failed to set request write deadlone",
+					slog.Any("err", err),
+				)
+
+				writeErrorAndLog(
+					logger, state, timedRequest,
+					http.StatusInternalServerError,
+					codeInternalError, "Internal server error",
+				)
+
+				return
+			}
 
 			next.ServeHTTP(state, timedRequest)
 

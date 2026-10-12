@@ -67,8 +67,8 @@ func (h *AuthHandler) Register(
 	}
 
 	var request registerRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		handleBadRequest(w, r, h.logger, "invalid request body")
+	if err := decodeJSON(w, r, &request, "email", "password"); err != nil {
+		handleJSONDecodeError(w, r, h.logger, err)
 
 		return
 	}
@@ -175,8 +175,8 @@ func (h *AuthHandler) Login(
 	}
 
 	var request loginRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		handleBadRequest(w, r, h.logger, "invalid request body")
+	if err := decodeJSON(w, r, &request, "email", "password"); err != nil {
+		handleJSONDecodeError(w, r, h.logger, err)
 
 		return
 	}

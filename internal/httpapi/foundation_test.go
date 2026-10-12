@@ -97,7 +97,7 @@ func TestDecodeJSON_RejectsInvalidRequestsWithoutWritingResponse(t *testing.T) {
 			var value struct {
 				Name string `json:"name"`
 			}
-			if err := decodeJSON(state, r, &value); !errors.Is(err, tc.want) {
+			if err := decodeJSON(state, r, &value, "name"); !errors.Is(err, tc.want) {
 				t.Errorf("error = %v, want %v", err, tc.want)
 			}
 			if state.Written() || w.Body.Len() != 0 || len(w.Header()) != 0 {
@@ -114,7 +114,7 @@ func TestDecodeJSON_AcceptsParametersAndExactBodyLimit(t *testing.T) {
 	var value struct {
 		Name string `json:"name"`
 	}
-	if err := decodeJSON(httptest.NewRecorder(), r, &value); err != nil {
+	if err := decodeJSON(httptest.NewRecorder(), r, &value, "name"); err != nil {
 		t.Fatal(err)
 	}
 	if len(value.Name) != int(maxJSONBodyBytes)-len(`{"name":""}`) {
@@ -223,17 +223,27 @@ func TestTimeout_PropagatesDeadlineAndCancelsContext(t *testing.T) {
 	logger, _ := testLogger()
 	m, err := NewTimeout(time.Millisecond, logger)
 	var childError error
+	var childDeadline time.Time
 	h := Chain(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		child := r.Context()
-		if _, ok := child.Deadline(); !ok {
+		deadline, ok := child.Deadline()
+		if !ok {
 			t.Fatal("missing deadline")
 		}
+		childDeadline = deadline
 		<-child.Done()
 		childError = child.Err()
 	}), requestIDMiddleware(t), mustMiddleware(t, m, err))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	writer := withReadDeadline(w)
+	h.ServeHTTP(writer, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 	assertErrorResponse(t, w, http.StatusGatewayTimeout, "deadline_exceeded")
+	if !writer.readDeadline.Equal(childDeadline) {
+		t.Errorf("read deadline = %v, want request deadline %v", writer.readDeadline, childDeadline)
+	}
+	if want := childDeadline.Add(responseWriteGrace); !writer.writeDeadline.Equal(want) {
+		t.Errorf("write deadline = %v, want %v", writer.writeDeadline, want)
+	}
 	if !errors.Is(childError, context.DeadlineExceeded) {
 		t.Errorf("context error = %v", childError)
 	}
@@ -378,7 +388,7 @@ func TestAuthentication_DeadlineBecomesGatewayTimeout(t *testing.T) {
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer token")
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
+	h.ServeHTTP(withReadDeadline(w), r)
 	assertErrorResponse(t, w, 504, "deadline_exceeded")
 }
 
@@ -446,7 +456,7 @@ func TestFullMiddlewareChain_EntryAndExitOrder(t *testing.T) {
 	h := Chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls = append(calls, "handler"); w.WriteHeader(204) }), spies...)
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer token")
-	h.ServeHTTP(httptest.NewRecorder(), r)
+	h.ServeHTTP(withReadDeadline(httptest.NewRecorder()), r)
 	want := make([]string, 0, 2*len(names)+1)
 	for _, name := range names {
 		want = append(want, name+" before")

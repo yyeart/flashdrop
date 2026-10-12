@@ -65,7 +65,7 @@ func TestLogging_CompletionAfterRecovery(t *testing.T) {
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test?secret=hidden", nil)
 			w := httptest.NewRecorder()
 			startedAt := time.Now()
-			h.ServeHTTP(w, r)
+			h.ServeHTTP(withReadDeadline(w), r)
 			elapsed := time.Since(startedAt)
 
 			wantStatus := tc.status
@@ -112,7 +112,7 @@ func TestRecovery_InvalidStatusWritesInternalError(t *testing.T) {
 	w := httptest.NewRecorder()
 	startedAt := time.Now()
 
-	h.ServeHTTP(w, r)
+	h.ServeHTTP(withReadDeadline(w), r)
 
 	assertErrorResponse(t, w, http.StatusInternalServerError, "internal_error")
 	assertCompletionLog(t, output, w, time.Since(startedAt), true)

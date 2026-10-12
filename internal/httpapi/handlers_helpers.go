@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -80,6 +81,31 @@ func handleRequestContextError(
 	default:
 		return false
 	}
+}
+
+func handleJSONDecodeError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	err error,
+) {
+	var timeoutErr net.Error
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+		writeErrorAndLog(
+			logger, w, r,
+			http.StatusGatewayTimeout,
+			codeDeadlineExceeded,
+			"request deadline exceeded",
+		)
+
+		return
+	}
+
+	if handleRequestContextError(w, r, logger) {
+		return
+	}
+
+	handleBadRequest(w, r, logger, "invalid request body")
 }
 
 func parsePathValue(r *http.Request, key string) (uuid.UUID, error) {

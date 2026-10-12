@@ -116,6 +116,7 @@ func TestService_Register_InvalidEmailDoesNotCallDependencies(t *testing.T) {
 		"spaces only":  "   ",
 		"malformed":    "not-an-email",
 		"display name": "Alice <USER@Example.COM>",
+		"too long":     strings.Repeat("a", 250) + "@x.io",
 	}
 
 	for name, email := range tests {
@@ -142,6 +143,18 @@ func TestService_Register_InvalidEmailDoesNotCallDependencies(t *testing.T) {
 				t.Fatalf("CreateUser() calls = %d, want 0", repository.calls)
 			}
 		})
+	}
+}
+
+func TestNormalizeEmail_AcceptsMaximumLength(t *testing.T) {
+	// 249 ASCII characters plus the five-character suffix reach the 254 limit.
+	email := strings.Repeat("A", 249) + "@x.io"
+	got, err := normalizeEmail(email)
+	if err != nil {
+		t.Fatalf("normalizeEmail() error = %v, want nil", err)
+	}
+	if want := strings.ToLower(email); got != want {
+		t.Errorf("normalized email = %q, want %q", got, want)
 	}
 }
 

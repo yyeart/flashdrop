@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+/flashdrop
 
 # Test binary, built with `go test -c`
 *.test

@@ -111,7 +111,7 @@ func (f *routerFixture) serve(
 	}
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
+	handler.ServeHTTP(withReadDeadline(response), request)
 
 	return response
 }

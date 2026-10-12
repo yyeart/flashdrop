@@ -159,8 +159,8 @@ func (h *ReservationHandler) reserveCommand(
 	}
 
 	var request reserveRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		handleBadRequest(w, r, h.logger, "invalid request body")
+	if err := decodeJSON(w, r, &request, "sale_item_id", "quantity"); err != nil {
+		handleJSONDecodeError(w, r, h.logger, err)
 
 		return flashsale.ReserveCommand{}, time.Time{}, false
 	}
@@ -191,7 +191,7 @@ func (h *ReservationHandler) reserveCommand(
 		ReservationID:  reservationID,
 		UserID:         userID,
 		SaleItemID:     request.SaleItemID,
-		Quantity:       request.Quantity,
+		Quantity:       int(request.Quantity),
 		ExpiresAt:      currentTime.Add(h.reservationTTL),
 		IdempotencyKey: key,
 	}, currentTime, true

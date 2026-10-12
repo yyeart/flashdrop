@@ -44,7 +44,7 @@ type addSaleItemRequest struct {
 	ProductID     uuid.UUID `json:"product_id"`
 	Name          *string   `json:"name"`
 	Price         string    `json:"price"`
-	TotalQuantity int       `json:"total_quantity"`
+	TotalQuantity qtyInput  `json:"total_quantity"`
 }
 
 func saleToResponse(sale flashsale.Sale) saleResponse {

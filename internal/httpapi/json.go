@@ -12,7 +12,12 @@ import (
 
 const maxJSONBodyBytes int64 = 1 << 20
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+func decodeJSON(
+	w http.ResponseWriter,
+	r *http.Request,
+	dest any,
+	allowedFields ...string,
+) error {
 	if err := validateJSONContentType(r.Header); err != nil {
 		return fmt.Errorf("validate JSON Content-Type: %w", err)
 	}
@@ -22,7 +27,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 
-	if err := decoder.Decode(dest); err != nil {
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
 		if errors.Is(err, io.EOF) {
 			return ErrEmptyBody
 		}
@@ -33,13 +39,48 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
 	var extra json.RawMessage
 	if err := decoder.Decode(&extra); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil
+			return decodeJSONObject(raw, dest, allowedFields)
 		}
 
 		return classifyJSONDecodeError(err)
 	}
 
 	return ErrMultipleJSONValues
+}
+
+func decodeJSONObject(
+	raw json.RawMessage,
+	dest any,
+	allowedFields []string,
+) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return classifyJSONDecodeError(err)
+	}
+
+	if fields == nil {
+		return ErrInvalidJSONType
+	}
+
+	allowed := make(map[string]struct{}, len(allowedFields))
+	for _, name := range allowedFields {
+		allowed[name] = struct{}{}
+	}
+
+	for name := range fields {
+		if _, ok := allowed[name]; !ok {
+			return fmt.Errorf(
+				"field %q: %w",
+				name, ErrUnknownJSONField,
+			)
+		}
+	}
+
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return classifyJSONDecodeError(err)
+	}
+
+	return nil
 }
 
 func writeJson(w http.ResponseWriter, status int, value any) error {

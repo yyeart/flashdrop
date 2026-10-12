@@ -9,7 +9,7 @@ import (
 
 type reserveRequest struct {
 	SaleItemID uuid.UUID `json:"sale_item_id"`
-	Quantity   int       `json:"quantity"`
+	Quantity   qtyInput  `json:"quantity"`
 }
 
 type reservationResponse struct {

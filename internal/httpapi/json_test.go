@@ -21,7 +21,7 @@ func TestDecodeJSON_DecodesObject(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 
 	var got payload
-	if err := decodeJSON(httptest.NewRecorder(), request, &got); err != nil {
+	if err := decodeJSON(httptest.NewRecorder(), request, &got, "name"); err != nil {
 		t.Fatalf("decodeJSON() error = %v, want nil", err)
 	}
 	if got.Name != "flashdrop" {

@@ -41,6 +41,10 @@ func (s *Service) Register(
 }
 
 func normalizeEmail(email string) (string, error) {
+	if len([]rune(email)) > 254 {
+		return "", ErrInvalidEmail
+	}
+
 	normalized := strings.ToLower(strings.TrimSpace(email))
 
 	parsed, err := mail.ParseAddress(normalized)

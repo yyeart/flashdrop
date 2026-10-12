@@ -96,8 +96,8 @@ func (h *AdminSaleHandler) Create(
 	}
 
 	var request createSaleRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		handleBadRequest(w, r, h.logger, "invalid request body")
+	if err := decodeJSON(w, r, &request, "starts_at", "ends_at"); err != nil {
+		handleJSONDecodeError(w, r, h.logger, err)
 
 		return
 	}
@@ -262,7 +262,12 @@ func (h *AdminSaleHandler) AddItem(
 		return
 	}
 
-	request, price, validationMessage := decodeAddSaleItemRequest(w, r)
+	request, price, validationMessage, err := decodeAddSaleItemRequest(w, r)
+	if err != nil {
+		handleJSONDecodeError(w, r, h.logger, err)
+		return
+	}
+
 	if validationMessage != "" {
 		handleBadRequest(w, r, h.logger, validationMessage)
 		return
@@ -278,7 +283,7 @@ func (h *AdminSaleHandler) AddItem(
 	if err := h.sales.AddSaleItem(
 		r.Context(),
 		saleID, itemID, request.ProductID,
-		*request.Name, price, request.TotalQuantity,
+		*request.Name, price, int(request.TotalQuantity),
 	); err != nil {
 		if r.Context().Err() != nil {
 			return
@@ -295,10 +300,10 @@ func (h *AdminSaleHandler) AddItem(
 		ProductID:         request.ProductID,
 		Name:              *request.Name,
 		Price:             moneyToString(price),
-		TotalQuantity:     request.TotalQuantity,
+		TotalQuantity:     int(request.TotalQuantity),
 		ReservedQuantity:  0,
 		SoldQuantity:      0,
-		AvailableQuantity: request.TotalQuantity,
+		AvailableQuantity: int(request.TotalQuantity),
 	}
 
 	if r.Context().Err() != nil {
@@ -313,28 +318,28 @@ func (h *AdminSaleHandler) AddItem(
 func decodeAddSaleItemRequest(
 	w http.ResponseWriter,
 	r *http.Request,
-) (addSaleItemRequest, flashsale.Money, string) {
+) (addSaleItemRequest, flashsale.Money, string, error) {
 	var request addSaleItemRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		return request, flashsale.Money{}, "invalid request body"
+	if err := decodeJSON(w, r, &request, "product_id", "name", "price", "total_quantity"); err != nil {
+		return request, flashsale.Money{}, "", err
 	}
 
 	if request.ProductID == uuid.Nil {
-		return request, flashsale.Money{}, "invalid request body"
+		return request, flashsale.Money{}, "invalid request body", nil
 	}
 
 	price, err := flashsale.ParseMoney(request.Price)
 	if err != nil {
-		return request, flashsale.Money{}, "invalid money value"
+		return request, flashsale.Money{}, "invalid money value", nil
 	}
 
 	if price.AmountMinor() <= 0 ||
 		request.TotalQuantity <= 0 ||
 		request.TotalQuantity > math.MaxInt32 {
-		return request, flashsale.Money{}, "invalid request body"
+		return request, flashsale.Money{}, "invalid request body", nil
 	}
 
-	return request, price, ""
+	return request, price, "", nil
 }
 
 func (h *AdminSaleHandler) handleAddSaleItemError(
