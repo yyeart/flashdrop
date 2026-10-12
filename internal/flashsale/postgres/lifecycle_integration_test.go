@@ -20,7 +20,7 @@ func TestStore_Cancel_RestoresStockAndMarksReservationCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if err := fixture.store.Cancel(ctx, reservation.ID(), fixture.now); err != nil {
+	if err := fixture.store.Cancel(ctx, fixture.userID, reservation.ID(), fixture.now); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestStore_Cancel_AfterExpirationRejectsWithoutChanges(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	err := fixture.store.Cancel(ctx, reservation.ID(), reservation.ExpiresAt())
+	err := fixture.store.Cancel(ctx, fixture.userID, reservation.ID(), reservation.ExpiresAt())
 	if !errors.Is(err, flashsale.ErrExpiredTimeWindow) {
 		t.Fatalf("Cancel() error = %v, want errors.Is(..., ErrExpiredTimeWindow)", err)
 	}
@@ -105,7 +105,7 @@ func TestStore_Lifecycle_UnknownReservation(t *testing.T) {
 		{
 			name: "cancel",
 			call: func(fixture *reserveFixture, ctx context.Context, id uuid.UUID, now time.Time) error {
-				return fixture.store.Cancel(ctx, id, now)
+				return fixture.store.Cancel(ctx, fixture.userID, id, now)
 			},
 		},
 		{
@@ -132,6 +132,31 @@ func TestStore_Lifecycle_UnknownReservation(t *testing.T) {
 	}
 }
 
+func TestStore_Cancel_ForeignReservationReturnsNotFoundWithoutChanges(t *testing.T) {
+	fixture := newReserveFixture(t, 2, flashsale.ActiveState)
+	reservation := reserveForLifecycle(t, fixture, 1)
+	foreignUserID := createFixtureUser(t, fixture)
+
+	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
+	defer cancel()
+
+	err := fixture.store.Cancel(
+		ctx, foreignUserID,
+		reservation.ID(), fixture.now,
+	)
+	if !errors.Is(err, flashsale.ErrReservationNotFound) {
+		t.Fatalf("Cancel() error = %v, want errors.Is(..., ErrReservationNotFound)", err)
+	}
+
+	if state := readReservationState(t, fixture, reservation.ID()); state != flashsale.PendingState {
+		t.Fatalf("reservation state = %q, want %q", state, flashsale.PendingState)
+	}
+	assertLifecycleStock(t, fixture, 1, 0)
+	if countOrders(t, fixture, reservation.ID()) != 0 {
+		t.Fatal("order was persisted after foreign Cancel")
+	}
+}
+
 func TestStore_Cancel_TerminalReservationIsNotCancelledAgain(t *testing.T) {
 	fixture := newReserveFixture(t, 2, flashsale.ActiveState)
 	reservation := reserveForLifecycle(t, fixture, 1)
@@ -139,11 +164,11 @@ func TestStore_Cancel_TerminalReservationIsNotCancelledAgain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), postgresOperationTimeout)
 	defer cancel()
 
-	if err := fixture.store.Cancel(ctx, reservation.ID(), fixture.now); err != nil {
+	if err := fixture.store.Cancel(ctx, fixture.userID, reservation.ID(), fixture.now); err != nil {
 		t.Fatalf("Cancel(first) error = %v", err)
 	}
 
-	err := fixture.store.Cancel(ctx, reservation.ID(), fixture.now)
+	err := fixture.store.Cancel(ctx, fixture.userID, reservation.ID(), fixture.now)
 	if !errors.Is(err, flashsale.ErrForbiddenTransition) {
 		t.Fatalf("Cancel(second) error = %v, want errors.Is(..., ErrForbiddenTransition)", err)
 	}
@@ -184,7 +209,7 @@ func TestStore_Lifecycle_CanceledContextDoesNotPersist(t *testing.T) {
 		{
 			name: "cancel",
 			call: func(fixture *reserveFixture, ctx context.Context, id uuid.UUID, now time.Time) error {
-				return fixture.store.Cancel(ctx, id, now)
+				return fixture.store.Cancel(ctx, fixture.userID, id, now)
 			},
 		},
 		{
@@ -232,7 +257,7 @@ func TestStore_Cancel_ConcurrentCallsHaveOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- fixture.store.Cancel(ctx, reservation.ID(), fixture.now)
+			results <- fixture.store.Cancel(ctx, fixture.userID, reservation.ID(), fixture.now)
 		}()
 	}
 	wg.Wait()

@@ -10,29 +10,39 @@ import (
 	"github.com/yyeart/flashdrop/internal/flashsale"
 )
 
+type selectSaleOptions struct {
+	ActiveOnly bool
+	ForUpdate  bool
+}
+
 func selectSaleSnapshot(
 	ctx context.Context,
 	tx pgx.Tx,
 	saleID uuid.UUID,
-	forUpdate bool,
+	options selectSaleOptions,
 ) (flashsale.SaleSnapshot, error) {
-	queryFormat := `
+	query := `
 		SELECT
 			id, state, starts_at, ends_at, created_at
 		FROM flashdrop.sales
 		WHERE id = $1
-		%s
-		`
+	`
 
-	var query string
-	if forUpdate {
-		query = fmt.Sprintf(queryFormat, "FOR UPDATE;")
-	} else {
-		query = fmt.Sprintf(queryFormat, ";")
+	args := []any{saleID}
+
+	if options.ActiveOnly {
+		query += ` AND state = $2`
+		args = append(args, string(flashsale.ActiveState))
 	}
 
+	if options.ForUpdate {
+		query += ` FOR UPDATE`
+	}
+
+	query += `;`
+
 	var saleSnapshot flashsale.SaleSnapshot
-	if err := tx.QueryRow(ctx, query, saleID).Scan(
+	if err := tx.QueryRow(ctx, query, args...).Scan(
 		&saleSnapshot.ID, &saleSnapshot.State,
 		&saleSnapshot.StartsAt, &saleSnapshot.EndsAt,
 		&saleSnapshot.CreatedAt,

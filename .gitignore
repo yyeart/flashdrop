@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+/flashdrop
 
 # Test binary, built with `go test -c`
 *.test
@@ -33,3 +34,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local development environment
+.dev/

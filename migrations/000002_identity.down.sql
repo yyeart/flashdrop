@@ -1,0 +1,1 @@
+DROP TABLE flashdrop.user_credentials;

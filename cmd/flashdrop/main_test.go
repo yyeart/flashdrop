@@ -18,13 +18,14 @@ func TestRun_CancelStopsWorkerAndWaitsForCompletion(t *testing.T) {
 	allowWorkerToFinish := make(chan struct{})
 	runReturned := make(chan struct{})
 
-	worker := func(ctx context.Context) {
+	worker := func(ctx context.Context) error {
 		close(workerStarted)
 
 		<-ctx.Done()
 		close(cancelObserved)
 
 		<-allowWorkerToFinish
+		return nil
 	}
 
 	go func() {
@@ -70,9 +71,10 @@ func TestRun_ReturnsWhenWorkerFinishesByItself(t *testing.T) {
 	allowWorkerToFinish := make(chan struct{})
 	runReturned := make(chan struct{})
 
-	worker := func(context.Context) {
+	worker := func(context.Context) error {
 		close(workerStarted)
 		<-allowWorkerToFinish
+		return nil
 	}
 
 	go func() {
@@ -103,6 +105,19 @@ func TestRun_ReturnsWhenWorkerFinishesByItself(t *testing.T) {
 	}
 }
 
+func TestRun_ReturnsWorkerError(t *testing.T) {
+	wantErr := errors.New("worker failed")
+
+	worker := func(context.Context) error {
+		return wantErr
+	}
+
+	err := run(context.Background(), time.Second, worker)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("run() error = %v, want error wrapping %v", err, wantErr)
+	}
+}
+
 func TestRun_DoesNotTimeoutBeforeContextCancellation(t *testing.T) {
 	ctx := context.Background()
 
@@ -110,9 +125,10 @@ func TestRun_DoesNotTimeoutBeforeContextCancellation(t *testing.T) {
 	allowWorkerToFinish := make(chan struct{})
 	runReturned := make(chan struct{})
 
-	worker := func(context.Context) {
+	worker := func(context.Context) error {
 		close(workerStarted)
 		<-allowWorkerToFinish
+		return nil
 	}
 
 	shutdownTimeout := 10 * time.Millisecond
@@ -154,13 +170,14 @@ func TestRun_AlreadyCancelledContextStillStartsAndWaitsForWorker(t *testing.T) {
 	allowCleanupToFinish := make(chan struct{})
 	runReturned := make(chan struct{})
 
-	worker := func(ctx context.Context) {
+	worker := func(ctx context.Context) error {
 		close(workerStarted)
 
 		<-ctx.Done()
 		close(cancelObserved)
 
 		<-allowCleanupToFinish
+		return nil
 	}
 
 	go func() {
@@ -206,13 +223,14 @@ func TestRun_ReturnsShutdownTimeoutError(t *testing.T) {
 	workerFinished := make(chan struct{})
 	runReturned := make(chan error, 1)
 
-	worker := func(ctx context.Context) {
+	worker := func(ctx context.Context) error {
 		close(workerStarted)
 
 		<-ctx.Done()
 		<-allowWorkerToFinish
 
 		close(workerFinished)
+		return nil
 	}
 
 	go func() {

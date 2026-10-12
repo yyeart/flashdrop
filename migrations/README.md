@@ -1,7 +1,8 @@
 # Миграции БД (PostgreSQL)
 
-Миграции описывают схему PostgreSQL для модуля `flashsale`. PostgreSQL является
-источником истины для Stock, Reservation, Order и долговечной идемпотентности.
+Миграции описывают схему PostgreSQL для модулей `flashsale` и `identity`.
+PostgreSQL является источником истины для Stock, Reservation, Order,
+долговечной идемпотентности и учётных данных User.
 
 ## Локальный запуск
 
@@ -35,7 +36,7 @@ set -a
 set +a
 ```
 
-Применить миграции:
+Применить все миграции по порядку:
 
 ```bash
 PGPASSWORD="$POSTGRES_PASSWORD" psql \
@@ -44,10 +45,11 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql \
   --username="$POSTGRES_USER" \
   --dbname="$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
-  -f migrations/000001_init.up.sql
+  -f migrations/000001_init.up.sql \
+  -f migrations/000002_identity.up.sql
 ```
 
-Откатить миграции:
+Откатить все миграции в обратном порядке:
 
 ```bash
 PGPASSWORD="$POSTGRES_PASSWORD" psql \
@@ -56,6 +58,7 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql \
   --username="$POSTGRES_USER" \
   --dbname="$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
+  -f migrations/000002_identity.down.sql \
   -f migrations/000001_init.down.sql
 ```
 
@@ -81,8 +84,8 @@ make migrate-create seq=add_example_table
 
 ## Интеграционные тесты PostgreSQL
 
-Тесты адаптера `flashsale/postgres` работают с настоящей базой из Compose и
-запускаются только явно. Перед запуском примените миграции:
+Тесты адаптеров `flashsale/postgres` и `identity/postgres` работают с настоящей
+базой из Compose и запускаются только явно. Перед запуском примените миграции:
 
 ```bash
 make db-up
@@ -104,8 +107,9 @@ make test-integration
 
 ## Инварианты базы данных
 
-Ниже зафиксирован контракт Milestone 2. Соответствующие базовые ограничения
-должны находиться в SQL-миграции, а не только в Go-коде:
+Ниже зафиксированы ограничения схемы из Milestone 2 и identity-среза
+Milestone 3. Соответствующие базовые ограничения должны находиться в
+SQL-миграциях, а не только в Go-коде:
 
 - UUID первичных ключей уникальны; внешние ключи не используют `ON DELETE CASCADE`.
 - `users.role` принимает только `user` или `admin`.
@@ -118,6 +122,7 @@ make test-integration
 - Идемпотентный ключ уникален в пределах `user_id`; запись хранит результат и
   отпечаток входного запроса, чтобы отличать повтор того же запроса от конфликта
   payload.
+- user_credentials.user_id является первичным и внешним ключом; email обязателен, нормализован и уникален; password_hash обязателен.
 
 ## Инварианты приложения
 
@@ -129,6 +134,9 @@ make test-integration
 - `pay/cancel/expire` с блокировкой Reservation и проверкой `pending`;
 - согласованность `user_id`, `sale_item_id` и `quantity` между Reservation и Order;
 - генерация UUID и timestamps, если они не имеют DB default;
+- регистрация User с ролью `user`, нормализация email и создание User вместе с
+  credentials в одной транзакции;
+- identity сохраняет password hash только в проверенном Argon2id PHC-формате.
 - отправка уведомлений только после успешного commit.
 
 ## Остановка и очистка

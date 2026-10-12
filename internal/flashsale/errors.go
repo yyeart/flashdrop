@@ -13,4 +13,5 @@ var (
 	ErrSaleItemNotFound          = errors.New("sale item not found")
 	ErrOrderNotFound             = errors.New("order not found")
 	ErrIdempotencyRecordNotFound = errors.New("idempotency record not found")
+	ErrInvalidPagination         = errors.New("invalid pagination")
 )

@@ -23,7 +23,9 @@ func (s *Store) AddSaleItem(
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
-	saleSnapshot, err := selectSaleSnapshot(ctx, tx, saleID, true)
+	saleSnapshot, err := selectSaleSnapshot(ctx, tx, saleID, selectSaleOptions{
+		ForUpdate: true,
+	})
 	if err != nil {
 		return err
 	}

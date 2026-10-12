@@ -111,7 +111,9 @@ func (s *Store) FindSale(
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
 	}()
 
-	saleSnapshot, err := selectSaleSnapshot(ctx, tx, id, false)
+	saleSnapshot, err := selectSaleSnapshot(ctx, tx, id, selectSaleOptions{
+		ForUpdate: false,
+	})
 	if err != nil {
 		return flashsale.Sale{}, err
 	}

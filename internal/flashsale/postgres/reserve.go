@@ -14,26 +14,10 @@ import (
 	"github.com/yyeart/flashdrop/internal/flashsale"
 )
 
-type ReserveCommand struct {
-	ReservationID uuid.UUID
-	UserID        uuid.UUID
-	SaleItemID    uuid.UUID
-	Quantity      int
-	ExpiresAt     time.Time
-
-	IdempotencyKey string
-}
-
-type ReserveResult struct {
-	Reservation flashsale.Reservation
-	Replayed    bool
-}
-
 type reservePayload struct {
 	UserID     uuid.UUID `json:"user_id"`
 	SaleItemID uuid.UUID `json:"sale_item_id"`
 	Quantity   int       `json:"quantity"`
-	ExpiresAt  time.Time `json:"expires_at"`
 }
 
 type storedRequestResult struct {
@@ -48,23 +32,23 @@ type idempotencyRecordResult struct {
 
 func (s *Store) Reserve(
 	ctx context.Context,
-	cmd ReserveCommand,
+	cmd flashsale.ReserveCommand,
 	now time.Time,
-) (ReserveResult, error) {
+) (flashsale.ReserveResult, error) {
 	if err := validateReserveCommand(cmd); err != nil {
-		return ReserveResult{}, err
+		return flashsale.ReserveResult{}, err
 	}
 
 	now = now.UTC()
 
 	requestHash, err := hashReserveCommand(cmd)
 	if err != nil {
-		return ReserveResult{}, fmt.Errorf("hash error: %w", err)
+		return flashsale.ReserveResult{}, fmt.Errorf("hash error: %w", err)
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return ReserveResult{}, fmt.Errorf("begin transaction: %w", err)
+		return flashsale.ReserveResult{}, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx) //nolint:errcheck // rollback is best effort after the operation result is known
@@ -76,15 +60,15 @@ func (s *Store) Reserve(
 		requestHash, now,
 	)
 	if err != nil {
-		return ReserveResult{}, err
+		return flashsale.ReserveResult{}, err
 	}
 
 	if idempotency.replayed {
 		if err := tx.Commit(ctx); err != nil {
-			return ReserveResult{}, fmt.Errorf("transaction commit: %w", err)
+			return flashsale.ReserveResult{}, fmt.Errorf("transaction commit: %w", err)
 		}
 
-		return ReserveResult{
+		return flashsale.ReserveResult{
 			Reservation: idempotency.reservation,
 			Replayed:    true,
 		}, nil
@@ -102,33 +86,33 @@ func (s *Store) Reserve(
 
 	reservation, err := flashsale.RehydrateReservation(reservationSnapshot)
 	if err != nil {
-		return ReserveResult{}, fmt.Errorf(
+		return flashsale.ReserveResult{}, fmt.Errorf(
 			"reservation validation: %w", err,
 		)
 	}
 
 	if err := reserveStock(ctx, tx, reservationSnapshot, now); err != nil {
-		return ReserveResult{}, err
+		return flashsale.ReserveResult{}, err
 	}
 
 	if err := persistReservationAndResult(
 		ctx, tx,
 		reservationSnapshot, idempotency.id,
 	); err != nil {
-		return ReserveResult{}, err
+		return flashsale.ReserveResult{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return ReserveResult{}, fmt.Errorf("transaction commit: %w", err)
+		return flashsale.ReserveResult{}, fmt.Errorf("transaction commit: %w", err)
 	}
 
-	return ReserveResult{
+	return flashsale.ReserveResult{
 		Reservation: reservation,
 		Replayed:    false,
 	}, nil
 }
 
-func validateReserveCommand(cmd ReserveCommand) error {
+func validateReserveCommand(cmd flashsale.ReserveCommand) error {
 	if cmd.UserID == uuid.Nil {
 		return fmt.Errorf("user_id is nil: %w", flashsale.ErrInvalidConfiguration)
 	}
@@ -284,12 +268,11 @@ func persistReservationAndResult(
 	return nil
 }
 
-func hashReserveCommand(cmd ReserveCommand) (string, error) {
+func hashReserveCommand(cmd flashsale.ReserveCommand) (string, error) {
 	payload := reservePayload{
 		UserID:     cmd.UserID,
 		SaleItemID: cmd.SaleItemID,
 		Quantity:   cmd.Quantity,
-		ExpiresAt:  cmd.ExpiresAt.UTC(),
 	}
 
 	raw, err := json.Marshal(payload)
